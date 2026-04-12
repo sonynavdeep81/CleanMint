@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# cleanmint-helper — CleanMint Privileged Helper
+# Installed to /usr/local/lib/cleanmint/cleanmint-helper
+# Called exclusively via pkexec — runs as root with a single auth prompt.
+# All CleanMint privileged operations go through this single entry point.
+#
+# Usage: pkexec /usr/local/lib/cleanmint/cleanmint-helper OPERATION [ARGS...]
+
+set -e
+
+OPERATION="${1:-}"
+shift || true
+
+case "$OPERATION" in
+    journal-vacuum)
+        exec /usr/bin/journalctl --vacuum-size=50M --vacuum-time=7d
+        ;;
+    apt-clean)
+        exec /usr/bin/apt-get clean
+        ;;
+    snap-remove)
+        # Args: <name> <revision>
+        [[ $# -ge 2 ]] || { echo "snap-remove requires <name> <revision>" >&2; exit 1; }
+        exec /usr/bin/snap remove --revision "$2" "$1"
+        ;;
+    systemctl-restart)
+        # Args: <service>
+        [[ $# -ge 1 ]] || { echo "systemctl-restart requires <service>" >&2; exit 1; }
+        exec /usr/bin/systemctl restart "$1"
+        ;;
+    *)
+        echo "cleanmint-helper: unknown operation '${OPERATION}'" >&2
+        echo "Valid operations: journal-vacuum, apt-clean, snap-remove, systemctl-restart" >&2
+        exit 1
+        ;;
+esac

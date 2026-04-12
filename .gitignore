@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+*.log
+~/.local/share/cleanmint/logs/
+dist/
+build/
+*.AppImage

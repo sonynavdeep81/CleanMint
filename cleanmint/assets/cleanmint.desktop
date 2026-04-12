@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CleanMint
+Comment=Linux System Cleaner for Ubuntu
+Exec=/home/navdeep/Cleanmint/cleanmint/run.sh
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Utility;
+Keywords=clean;disk;junk;cache;optimize;system;
+StartupWMClass=cleanmint
