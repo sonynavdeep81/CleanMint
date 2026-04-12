@@ -21,6 +21,7 @@ NAV_ITEMS = [
     ("dashboard",  "⬡  Dashboard"),
     ("cleaner",    "✦  Cleaner"),
     ("analyzer",   "◈  Analyzer"),
+    ("apps",       "⊞  Apps"),
     ("startup",    "⚡  Startup"),
     ("health",     "♥  Health"),
     ("settings",   "⚙  Settings"),
@@ -161,6 +162,9 @@ class MainWindow(QMainWindow):
         elif key == "analyzer":
             from ui.analyzer_page import AnalyzerPage
             return AnalyzerPage()
+        elif key == "apps":
+            from ui.apps_page import AppsPage
+            return AppsPage()
         elif key == "startup":
             from ui.startup_page import StartupPage
             return StartupPage()

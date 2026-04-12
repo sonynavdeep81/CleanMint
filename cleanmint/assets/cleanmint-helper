@@ -28,9 +28,25 @@ case "$OPERATION" in
         [[ $# -ge 1 ]] || { echo "systemctl-restart requires <service>" >&2; exit 1; }
         exec /usr/bin/systemctl restart "$1"
         ;;
+    apt-remove)
+        # Args: <package>
+        [[ $# -ge 1 ]] || { echo "apt-remove requires <package>" >&2; exit 1; }
+        exec /usr/bin/apt-get remove -y "$1"
+        ;;
+    snap-uninstall)
+        # Args: <name>  (removes all revisions)
+        [[ $# -ge 1 ]] || { echo "snap-uninstall requires <name>" >&2; exit 1; }
+        exec /usr/bin/snap remove "$1"
+        ;;
+    flatpak-uninstall)
+        # Args: <app-id>
+        [[ $# -ge 1 ]] || { echo "flatpak-uninstall requires <app-id>" >&2; exit 1; }
+        exec /usr/bin/flatpak uninstall -y "$1"
+        ;;
     *)
         echo "cleanmint-helper: unknown operation '${OPERATION}'" >&2
-        echo "Valid operations: journal-vacuum, apt-clean, snap-remove, systemctl-restart" >&2
+        echo "Valid: journal-vacuum, apt-clean, snap-remove, snap-uninstall," >&2
+        echo "       apt-remove, flatpak-uninstall, systemctl-restart" >&2
         exit 1
         ;;
 esac
