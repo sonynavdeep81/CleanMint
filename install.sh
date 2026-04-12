@@ -28,6 +28,12 @@ if [[ "$1" == "--remove" ]]; then
     rm -rf "$INSTALL_DIR"
     rm -f  "$BIN_LINK"
     rm -f  "$DESKTOP_FILE"
+    # Remove icons
+    for size in 16 32 48 64 128 256 512; do
+        rm -f "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/cleanmint.png"
+    done
+    rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/cleanmint.svg"
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
     update-desktop-database "$HOME/.local/share/applications/" 2>/dev/null || true
     echo "Polkit policy not removed automatically (needs sudo)."
     echo "To fully remove, run: sudo rm $POLICY_DEST"
@@ -104,8 +110,24 @@ EOF
 chmod +x "$BIN_LINK"
 ok "Launcher created at $BIN_LINK"
 
-# ── 8. Install desktop entry ─────────────────────────────────────
-info "Installing app launcher icon…"
+# ── 8. Install app icons ─────────────────────────────────────────
+info "Installing app icons…"
+for size in 16 32 48 64 128 256 512; do
+    icon_dir="$HOME/.local/share/icons/hicolor/${size}x${size}/apps"
+    mkdir -p "$icon_dir"
+    src="$INSTALL_DIR/assets/icons/cleanmint_${size}.png"
+    [[ -f "$src" ]] && cp "$src" "$icon_dir/cleanmint.png"
+done
+svg_src="$INSTALL_DIR/assets/icons/cleanmint.svg"
+if [[ -f "$svg_src" ]]; then
+    mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
+    cp "$svg_src" "$HOME/.local/share/icons/hicolor/scalable/apps/cleanmint.svg"
+fi
+gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
+ok "Icons installed"
+
+# ── 9. Install desktop entry ─────────────────────────────────────
+info "Installing app launcher entry…"
 mkdir -p "$HOME/.local/share/applications"
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
@@ -114,14 +136,14 @@ Type=Application
 Name=CleanMint
 Comment=Linux System Cleaner for Ubuntu
 Exec=$BIN_LINK
-Icon=utilities-system-monitor
+Icon=cleanmint
 Terminal=false
 Categories=System;Utility;
 Keywords=clean;disk;junk;cache;optimize;system;
 StartupWMClass=cleanmint
 EOF
 update-desktop-database "$HOME/.local/share/applications/" 2>/dev/null || true
-ok "App icon installed — search 'CleanMint' in your app launcher"
+ok "App launcher entry installed — search 'CleanMint' in your app launcher"
 
 # ── Done ─────────────────────────────────────────────────────────
 echo ""
