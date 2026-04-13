@@ -78,8 +78,8 @@ with tempfile.TemporaryDirectory(prefix="cleanmint_cleaner_") as td:
           result.freed_human)
     check("Dry-run: deleted_count > 0", result.deleted_count > 0)
     check("Dry-run: no errors", len(result.errors) == 0, str(result.errors))
-    check("Dry-run: actions mention 'Would delete'",
-          all("Would delete" in a for a in result.actions))
+    check("Dry-run: actions mention '[DRY-RUN]'",
+          all("[DRY-RUN]" in a for a in result.actions))
 
 
 # ---------------------------------------------------------------
@@ -103,8 +103,8 @@ with tempfile.TemporaryDirectory(prefix="cleanmint_cleaner_") as td:
     check("Real delete: deleted_count == 4", result.deleted_count == 4,
           str(result.deleted_count))
     check("Real delete: no errors", len(result.errors) == 0, str(result.errors))
-    check("Real delete: actions mention 'Deleted'",
-          all("Deleted" in a for a in result.actions))
+    check("Real delete: actions mention '[DELETED]'",
+          all("[DELETED]" in a for a in result.actions))
 
 
 # ---------------------------------------------------------------

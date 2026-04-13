@@ -31,7 +31,11 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
 - **Printer Profile page**: Lists all configured CUPS printers with status details; exports a `restore_printers.sh` script to recreate printer configs on a new machine
 - **VS Code Profile page**: Shows all installed VS Code extensions (name, ID, version) + user `settings.json`; exports a `restore_vscode.sh` to reinstall extensions on any machine
 - **Settings page**: Dark/light mode, persistent JSON settings
-- **Logs page**: Shows CleanMint session logs
+- **Logs page**: Shows CleanMint session logs with color-coded highlighting
+  - `[DELETED]` / `[SNAP REMOVED]` lines highlighted red — shows exactly what was removed
+  - `[SNAP PROTECTED]` / `BLOCKED` highlighted orange — skipped for safety
+  - `[DRY-RUN]` highlighted grey — preview only, nothing deleted
+  - **"Deletions Only" filter button** — one click shows only actual deletions across the session
 - **Polkit policy**: Installed at `/usr/share/polkit-1/actions/org.cleanmint.policy`
   - Single helper script `/usr/local/lib/cleanmint/cleanmint-helper` covers all privileged ops
   - Covers: journalctl, snap, apt-get, systemctl — all with `auth_admin_keep` (one password per session)
@@ -334,3 +338,10 @@ Cleanmint/
 - CORRECT: `_SAFE_ZONES` = only `.cache` and `/tmp`/`/var/tmp`. Downloads is explicitly excluded.
   Only delete a copy when at least one copy exists OUTSIDE the safe zone (so data is always preserved).
   All deletions still go through `validate_delete()`.
+
+### 21. Snap revision cleaner must never remove GPU/platform content snaps
+- WRONG: cleaning all "disabled" snap revisions can remove `mesa-2404` (GPU driver) or GNOME platform
+  snaps — this silently breaks apps like the Ubuntu App Center (snap-store) without any obvious error.
+- CORRECT: `_PROTECTED_SNAPS` in `cleaner.py` lists snaps that are NEVER removed even if disabled:
+  `mesa-2404`, `mesa-2204`, `core`/`core18`/`core20`/`core22`/`core24`, all `gnome-*` platform snaps,
+  `gtk-common-themes`, `snapd`. Protected snaps log as `[SNAP PROTECTED]` and are skipped silently.

@@ -22,6 +22,23 @@ from core.scanner import ScanCategory, _human_size
 LOG_DIR = Path.home() / ".local" / "share" / "cleanmint" / "logs"
 HELPER  = "/usr/local/lib/cleanmint/cleanmint-helper"
 
+# Snaps that must NEVER be removed even when their revision is disabled.
+# These are GPU drivers, platform runtimes, and content providers that other
+# snaps depend on silently — removing them breaks apps without warning.
+_PROTECTED_SNAPS: frozenset[str] = frozenset({
+    # GPU / Mesa drivers
+    "mesa-2404", "mesa-2204",
+    # Snap base runtimes
+    "core", "core18", "core20", "core22", "core24",
+    # GNOME platform content snaps
+    "gnome-3-28-1804", "gnome-3-34-1804", "gnome-3-38-2004",
+    "gnome-42-2204", "gnome-44-2304", "gnome-46-2404",
+    # Common theme / icon content snaps
+    "gtk-common-themes",
+    # Snap infrastructure
+    "snapd",
+})
+
 
 @dataclass
 class CleanResult:
@@ -132,7 +149,8 @@ class Cleaner:
 
                 result.freed_bytes += size
                 result.deleted_count += 1
-                action = f"{'Would delete' if self.dry_run else 'Deleted'}: {path} ({_human_size(size)})"
+                prefix = "[DRY-RUN]" if self.dry_run else "[DELETED]"
+                action = f"{prefix} {path} ({_human_size(size)})"
                 result.actions.append(action)
                 self._log(action)
 
@@ -180,6 +198,14 @@ class Cleaner:
                 parts = line.split()
                 if len(parts) >= 6 and "disabled" in parts[5]:
                     name, rev = parts[0], parts[2]
+                    if name in _PROTECTED_SNAPS:
+                        self._log(
+                            f"[SNAP PROTECTED] Skipping {name} rev {rev} "
+                            f"— platform/GPU snap, never auto-removed.",
+                            "warning",
+                        )
+                        result.skipped_count += 1
+                        continue
                     snap_file = snap_base / f"{name}_{rev}.snap"
                     size = snap_file.stat().st_size if snap_file.exists() else 0
                     pending.append((name, rev, size))
@@ -190,7 +216,8 @@ class Cleaner:
 
             # Log all actions
             for name, rev, size in pending:
-                action = f"{'Would remove' if self.dry_run else 'Will remove'} snap {name} rev {rev} ({_human_size(size)})"
+                prefix = "[SNAP DRY-RUN]" if self.dry_run else "[SNAP REMOVED]"
+                action = f"{prefix} {name} rev {rev} ({_human_size(size)})"
                 self._log(action)
                 result.actions.append(action)
                 result.freed_bytes += size
@@ -327,7 +354,8 @@ class Cleaner:
                         if stat.st_uid != uid:
                             continue   # skip root-owned or other-user files
                         size = self._get_size(entry)
-                        action = f"{'Would delete' if self.dry_run else 'Deleted'}: {entry} ({_human_size(size)})"
+                        prefix = "[DRY-RUN]" if self.dry_run else "[DELETED]"
+                        action = f"{prefix} {entry} ({_human_size(size)})"
                         self._log(action)
                         result.actions.append(action)
 
