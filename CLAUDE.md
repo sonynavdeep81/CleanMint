@@ -106,6 +106,47 @@ sudo rm /usr/local/lib/cleanmint/cleanmint-helper
 
 ---
 
+### Restoring your apps on a new machine using a Snapshot
+
+If you previously took a snapshot on your old machine, you can restore all your
+installed apps (apt, snap, flatpak) onto any fresh Ubuntu install — **no CleanMint
+needed on the new machine**.
+
+**Step 1 — Export the restore script (on your old machine):**
+- Open CleanMint → Snapshots → select your snapshot → "⬇ Export Restore Script"
+- Save `restore.sh` to a USB drive, cloud storage, or email it to yourself
+
+**Step 2 — On the new machine (after fresh Ubuntu install):**
+```bash
+bash restore.sh
+```
+
+The script will automatically:
+1. Add your PPAs
+2. Install all apt packages
+3. Install Snap apps
+4. Install Flatpak apps
+
+If any single package fails (e.g. removed from repos), it is skipped with `|| true`
+and the rest continue — the restore never aborts mid-way.
+
+**Step 3 — Reboot**
+
+> Note: The restore script installs your *software environment* only.
+> Personal files (Documents, Pictures, code) must be copied separately via USB or rsync.
+
+**Complete new-machine workflow (CleanMint + all your apps):**
+```bash
+# 1. Install CleanMint
+git clone https://github.com/sonynavdeep81/CleanMint.git ~/Cleanmint
+cd ~/Cleanmint && bash install.sh
+
+# 2. Restore all your apps
+bash restore.sh
+```
+
+---
+
 ### Manual run (development / testing without installing)
 ```bash
 cd ~/Cleanmint
