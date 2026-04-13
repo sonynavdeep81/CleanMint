@@ -22,6 +22,12 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
 - **Startup page**: Lists XDG autostart apps and systemd user services
   - Safety ratings per entry: Keep (green) / Safe (blue) / Caution (orange) / Unknown (grey)
   - Click any row for a plain-English explanation of what the service does and whether it is safe to disable
+- **Snapshot page**: Captures installed packages (apt, snap, flatpak) + PPA sources into a timestamped snapshot
+  - "Take Snapshot" runs in background with live progress bar; prompts for optional label
+  - "Export Restore Script" saves a `restore.sh` — run it on any fresh Ubuntu install to recreate the environment
+  - "Compare Two" shows a `+`/`-` diff of packages added/removed between any two snapshots
+  - Snapshots stored in `~/.local/share/cleanmint/snapshots/` (never committed to git)
+  - Restore script handles PPAs, apt, snap, flatpak in order; uses `|| true` so one failure never aborts the rest
 - **Settings page**: Dark/light mode, persistent JSON settings
 - **Logs page**: Shows CleanMint session logs
 - **Polkit policy**: Installed at `/usr/share/polkit-1/actions/org.cleanmint.policy`
@@ -133,6 +139,7 @@ Cleanmint/
       analyzer.py                  # Large files, folders, duplicates, broken symlinks
       health.py                    # 6 health checks, returns HealthCheck list
       startup.py                   # Startup app/service lister + safety knowledge base
+      snapshot.py                  # Snapshot engine: capture packages, diff, generate restore.sh
       installer.py                 # Polkit policy + helper installer (pkexec tee)
       reporter.py                  # PDF report export
     ui/
@@ -143,6 +150,7 @@ Cleanmint/
       analyzer_page.py             # Analyzer page (delete duplicates + broken symlinks)
       health_page.py               # Health page (AptUpgradeDialog, service restart)
       startup_page.py              # Startup page (safety badges, detail popup)
+      snapshot_page.py             # Snapshot page (take, export, compare, delete)
       settings_page.py             # Settings page
       logs_page.py                 # Logs page
     config/

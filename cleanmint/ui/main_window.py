@@ -24,6 +24,7 @@ NAV_ITEMS = [
     ("apps",       "⊞  Apps"),
     ("startup",    "⚡  Startup"),
     ("health",     "♥  Health"),
+    ("snapshot",   "◉  Snapshots"),
     ("settings",   "⚙  Settings"),
     ("logs",       "▤  Logs"),
 ]
@@ -171,6 +172,9 @@ class MainWindow(QMainWindow):
         elif key == "health":
             from ui.health_page import HealthPage
             return HealthPage()
+        elif key == "snapshot":
+            from ui.snapshot_page import SnapshotPage
+            return SnapshotPage()
         elif key == "settings":
             from ui.settings_page import SettingsPage
             return SettingsPage()
