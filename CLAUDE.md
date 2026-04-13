@@ -6,7 +6,7 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
 
 ---
 
-## Current Working State (as of 2026-04-12)
+## Current Working State (as of 2026-04-13)
 
 ### What is fully working
 - **Cleaner page**: Scans 10 categories, shows sizes, checkbox selection, preview dialog, real clean
@@ -28,6 +28,8 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
   - "Compare Two" shows a `+`/`-` diff of packages added/removed between any two snapshots
   - Snapshots stored in `~/.local/share/cleanmint/snapshots/` (never committed to git)
   - Restore script handles PPAs, apt, snap, flatpak in order; uses `|| true` so one failure never aborts the rest
+- **Printer Profile page**: Lists all configured CUPS printers with status details; exports a `restore_printers.sh` script to recreate printer configs on a new machine
+- **VS Code Profile page**: Shows all installed VS Code extensions (name, ID, version) + user `settings.json`; exports a `restore_vscode.sh` to reinstall extensions on any machine
 - **Settings page**: Dark/light mode, persistent JSON settings
 - **Logs page**: Shows CleanMint session logs
 - **Polkit policy**: Installed at `/usr/share/polkit-1/actions/org.cleanmint.policy`
@@ -147,6 +149,34 @@ bash restore.sh
 
 ---
 
+### Restoring VS Code extensions on a new machine
+
+**Step 1 — Export (on your old machine):**
+- Open CleanMint → VS Code Profile → "⬇ Export Restore Script"
+- Save `restore_vscode.sh` to USB / cloud
+
+**Step 2 — On the new machine:**
+```bash
+bash restore_vscode.sh
+```
+Installs all extensions via `code --install-extension`. Requires VS Code to already be installed.
+
+---
+
+### Restoring printers on a new machine
+
+**Step 1 — Export (on your old machine):**
+- Open CleanMint → Printer Profile → "⬇ Export Restore Script"
+- Save `restore_printers.sh` to USB / cloud
+
+**Step 2 — On the new machine:**
+```bash
+bash restore_printers.sh
+```
+Re-adds each printer via `lpadmin`. Requires CUPS to be running (`sudo systemctl start cups`).
+
+---
+
 ### Manual run (development / testing without installing)
 ```bash
 cd ~/Cleanmint
@@ -181,6 +211,8 @@ Cleanmint/
       health.py                    # 6 health checks, returns HealthCheck list
       startup.py                   # Startup app/service lister + safety knowledge base
       snapshot.py                  # Snapshot engine: capture packages, diff, generate restore.sh
+      printer.py                   # CUPS printer lister + restore script generator
+      vscode.py                    # VS Code extension/settings reader + restore script generator
       installer.py                 # Polkit policy + helper installer (pkexec tee)
       reporter.py                  # PDF report export
     ui/
@@ -192,6 +224,8 @@ Cleanmint/
       health_page.py               # Health page (AptUpgradeDialog, service restart)
       startup_page.py              # Startup page (safety badges, detail popup)
       snapshot_page.py             # Snapshot page (take, export, compare, delete)
+      printer_page.py              # Printer Profile page (CUPS printer list, export restore script)
+      vscode_page.py               # VS Code Profile page (extensions viewer, export restore script)
       settings_page.py             # Settings page
       logs_page.py                 # Logs page
     config/
