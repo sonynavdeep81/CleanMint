@@ -25,6 +25,7 @@ NAV_ITEMS = [
     ("startup",    "⚡  Startup"),
     ("health",     "♥  Health"),
     ("snapshot",   "◉  Snapshots"),
+    ("vscode",     "⌨  VS Code"),
     ("settings",   "⚙  Settings"),
     ("logs",       "▤  Logs"),
 ]
@@ -175,6 +176,9 @@ class MainWindow(QMainWindow):
         elif key == "snapshot":
             from ui.snapshot_page import SnapshotPage
             return SnapshotPage()
+        elif key == "vscode":
+            from ui.vscode_page import VSCodePage
+            return VSCodePage()
         elif key == "settings":
             from ui.settings_page import SettingsPage
             return SettingsPage()
