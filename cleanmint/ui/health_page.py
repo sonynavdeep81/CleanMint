@@ -12,6 +12,7 @@ from PyQt6.QtGui import QFont
 
 from ui.theme import Theme
 from core.health import HealthChecker, HealthCheck
+from core.icon_doctor import BrokenIconApp, scan_broken_icons, fix_icon
 
 
 class HealthWorker(QThread):
@@ -316,6 +317,281 @@ class HealthRow(QFrame):
         msg.exec()
 
 
+# ── Icon Doctor workers ────────────────────────────────────────────────────────
+
+class IconScanWorker(QThread):
+    finished = pyqtSignal(list)
+    error    = pyqtSignal(str)
+
+    def run(self):
+        try:
+            self.finished.emit(scan_broken_icons())
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class IconFixWorker(QThread):
+    progress = pyqtSignal(str, str)   # (icon_name, message)
+    done     = pyqtSignal(str, bool, str)  # (icon_name, success, message)
+
+    def __init__(self, apps: list[BrokenIconApp]):
+        super().__init__()
+        self._apps = apps
+
+    def run(self):
+        for app in self._apps:
+            self.progress.emit(app.icon_name, f"Fixing {app.name}…")
+            ok, msg = fix_icon(app, progress=lambda m: self.progress.emit(app.icon_name, m))
+            self.done.emit(app.icon_name, ok, msg)
+
+
+# ── Icon Doctor row ────────────────────────────────────────────────────────────
+
+class IconDoctorRow(QFrame):
+    fix_requested = pyqtSignal(object)  # BrokenIconApp
+
+    def __init__(self, app: BrokenIconApp):
+        super().__init__()
+        self.app = app
+        self.setObjectName("Card")
+        self.setFixedHeight(52)
+
+        p = Theme.p()
+        type_colours = {
+            "appimage": ("#a78bfa", "AppImage"),
+            "snap":     (p.info,    "Snap"),
+            "flatpak":  (p.accent,  "Flatpak"),
+            "unknown":  (p.text_muted, "Unknown"),
+        }
+        colour, type_label = type_colours.get(app.install_type, (p.text_muted, "?"))
+
+        h = QHBoxLayout(self)
+        h.setContentsMargins(14, 0, 14, 0)
+        h.setSpacing(12)
+
+        # Warning dot
+        dot = QLabel("●")
+        dot.setStyleSheet(f"color: {p.warning}; font-size: 10px;")
+        dot.setFixedWidth(14)
+        h.addWidget(dot)
+
+        # App name
+        name_lbl = QLabel(app.name)
+        name_lbl.setFont(QFont("Inter", 11, QFont.Weight.Medium))
+        name_lbl.setMinimumWidth(160)
+        h.addWidget(name_lbl)
+
+        # Icon name (muted)
+        icon_lbl = QLabel(app.icon_name)
+        icon_lbl.setObjectName("MutedLabel")
+        icon_lbl.setFont(QFont("Inter", 10))
+        h.addWidget(icon_lbl, 1)
+
+        # Type badge
+        badge = QLabel(type_label)
+        badge.setFixedHeight(20)
+        badge.setContentsMargins(8, 0, 8, 0)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(
+            f"background: {colour}22; color: {colour};"
+            f"border-radius: 10px; font-size: 10px; font-weight: 600;"
+        )
+        h.addWidget(badge)
+
+        # Status label (updated during fix)
+        self._status = QLabel("")
+        self._status.setObjectName("MutedLabel")
+        self._status.setFont(QFont("Inter", 10))
+        self._status.setFixedWidth(180)
+        h.addWidget(self._status)
+
+        # Fix button
+        self._fix_btn = QPushButton("Fix")
+        self._fix_btn.setObjectName("SecondaryBtn")
+        self._fix_btn.setFixedSize(56, 26)
+        self._fix_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        if app.install_type == "unknown":
+            self._fix_btn.setEnabled(False)
+            self._fix_btn.setToolTip("Cannot auto-fix: unknown install type")
+        self._fix_btn.clicked.connect(lambda: self.fix_requested.emit(self.app))
+        h.addWidget(self._fix_btn)
+
+    def set_fixing(self, msg: str = ""):
+        self._fix_btn.setEnabled(False)
+        self._fix_btn.setText("…")
+        if msg:
+            self._status.setText(msg[:30])
+
+    def set_result(self, success: bool, msg: str):
+        p = Theme.p()
+        if success:
+            self._fix_btn.setText("✓")
+            self._fix_btn.setStyleSheet(f"color: {p.success};")
+            self._status.setText("Fixed")
+            self._status.setStyleSheet(f"color: {p.success};")
+        else:
+            self._fix_btn.setText("✕")
+            self._fix_btn.setStyleSheet(f"color: {p.danger};")
+            short = msg[:40] if len(msg) > 40 else msg
+            self._status.setText(short)
+            self._status.setStyleSheet(f"color: {p.danger};")
+            self._status.setToolTip(msg)
+
+
+# ── Icon Doctor section ────────────────────────────────────────────────────────
+
+class IconDoctorSection(QFrame):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("Card")
+        self._rows: list[IconDoctorRow] = []
+        self._scan_worker: IconScanWorker | None = None
+        self._fix_worker: IconFixWorker | None = None
+        self._build_ui()
+
+    def _build_ui(self):
+        p = Theme.p()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 14, 16, 14)
+        outer.setSpacing(10)
+
+        # Header row
+        hdr = QHBoxLayout()
+        hdr.setSpacing(10)
+
+        icon_lbl = QLabel("🔍")
+        icon_lbl.setFixedWidth(24)
+        hdr.addWidget(icon_lbl)
+
+        title = QLabel("Icon Doctor")
+        title.setFont(QFont("Inter", 13, QFont.Weight.Bold))
+        hdr.addWidget(title)
+
+        sub = QLabel("— finds apps missing their icons and fixes them automatically")
+        sub.setObjectName("MutedLabel")
+        sub.setFont(QFont("Inter", 11))
+        hdr.addWidget(sub, 1)
+
+        self._fix_all_btn = QPushButton("Fix All")
+        self._fix_all_btn.setObjectName("SecondaryBtn")
+        self._fix_all_btn.setFixedHeight(30)
+        self._fix_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fix_all_btn.setVisible(False)
+        self._fix_all_btn.clicked.connect(self._fix_all)
+        hdr.addWidget(self._fix_all_btn)
+
+        self._scan_btn = QPushButton("Scan Icons")
+        self._scan_btn.setObjectName("SecondaryBtn")
+        self._scan_btn.setFixedHeight(30)
+        self._scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._scan_btn.clicked.connect(self._start_scan)
+        hdr.addWidget(self._scan_btn)
+
+        outer.addLayout(hdr)
+
+        # Status line
+        self._status = QLabel("Click Scan Icons to check for missing app icons.")
+        self._status.setObjectName("MutedLabel")
+        outer.addWidget(self._status)
+
+        # Results container (hidden until scan)
+        self._results = QWidget()
+        self._results_layout = QVBoxLayout(self._results)
+        self._results_layout.setContentsMargins(0, 0, 0, 0)
+        self._results_layout.setSpacing(6)
+        self._results.setVisible(False)
+        outer.addWidget(self._results)
+
+    def _start_scan(self):
+        if self._scan_worker and self._scan_worker.isRunning():
+            return
+        self._scan_btn.setEnabled(False)
+        self._scan_btn.setText("Scanning…")
+        self._fix_all_btn.setVisible(False)
+        self._status.setText("Scanning installed apps…")
+        self._clear_rows()
+        self._results.setVisible(False)
+
+        self._scan_worker = IconScanWorker()
+        self._scan_worker.finished.connect(self._on_scan_done)
+        self._scan_worker.error.connect(lambda e: self._status.setText(f"Error: {e}"))
+        self._scan_worker.finished.connect(lambda: (
+            self._scan_btn.setEnabled(True),
+            self._scan_btn.setText("Scan Icons"),
+        ))
+        self._scan_worker.start()
+
+    def _on_scan_done(self, apps: list[BrokenIconApp]):
+        p = Theme.p()
+        if not apps:
+            self._status.setText("All app icons are correctly installed.")
+            self._status.setStyleSheet(f"color: {p.success};")
+            return
+
+        fixable = [a for a in apps if a.install_type != "unknown"]
+        self._status.setText(
+            f"{len(apps)} app(s) with missing icons"
+            + (f" · {len(fixable)} can be auto-fixed" if fixable else "")
+        )
+        self._status.setStyleSheet("")
+
+        for app in apps:
+            row = IconDoctorRow(app)
+            row.fix_requested.connect(self._fix_one)
+            self._results_layout.addWidget(row)
+            self._rows.append(row)
+
+        self._results.setVisible(True)
+        if fixable:
+            self._fix_all_btn.setVisible(True)
+
+    def _fix_one(self, app: BrokenIconApp):
+        row = next((r for r in self._rows if r.app.icon_name == app.icon_name), None)
+        if row:
+            row.set_fixing()
+        self._run_fix([app])
+
+    def _fix_all(self):
+        fixable = [r.app for r in self._rows if r.app.install_type != "unknown"]
+        for r in self._rows:
+            if r.app.install_type != "unknown":
+                r.set_fixing()
+        self._fix_all_btn.setEnabled(False)
+        self._run_fix(fixable)
+
+    def _run_fix(self, apps: list[BrokenIconApp]):
+        if self._fix_worker and self._fix_worker.isRunning():
+            return
+        self._fix_worker = IconFixWorker(apps)
+        self._fix_worker.progress.connect(self._on_fix_progress)
+        self._fix_worker.done.connect(self._on_fix_done)
+        self._fix_worker.finished.connect(self._on_all_fixes_done)
+        self._fix_worker.start()
+
+    def _on_all_fixes_done(self):
+        self._fix_all_btn.setEnabled(True)
+        # Re-enable Fix buttons on rows that haven't been fixed yet
+        for row in self._rows:
+            if row.app.install_type != "unknown" and row._fix_btn.text() not in ("✓", "✕"):
+                row._fix_btn.setEnabled(True)
+                row._fix_btn.setText("Fix")
+
+    def _on_fix_progress(self, icon_name: str, msg: str):
+        row = next((r for r in self._rows if r.app.icon_name == icon_name), None)
+        if row:
+            row.set_fixing(msg)
+
+    def _on_fix_done(self, icon_name: str, success: bool, msg: str):
+        row = next((r for r in self._rows if r.app.icon_name == icon_name), None)
+        if row:
+            row.set_result(success, msg)
+
+    def _clear_rows(self):
+        for row in self._rows:
+            row.deleteLater()
+        self._rows.clear()
+
+
 class HealthPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -380,6 +656,10 @@ class HealthPage(QWidget):
         self._list_layout.addStretch()
         scroll.setWidget(self._list_container)
         outer.addWidget(scroll, 1)
+
+        # Icon Doctor section
+        self._icon_doctor = IconDoctorSection()
+        outer.addWidget(self._icon_doctor)
 
     def _start_check(self):
         if self._worker and self._worker.isRunning():
