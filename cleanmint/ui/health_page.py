@@ -348,7 +348,8 @@ class IconFixWorker(QThread):
 # ── Icon Doctor row ────────────────────────────────────────────────────────────
 
 class IconDoctorRow(QFrame):
-    fix_requested = pyqtSignal(object)  # BrokenIconApp
+    fix_requested    = pyqtSignal(object)  # BrokenIconApp
+    remove_requested = pyqtSignal(object)  # BrokenIconApp
 
     def __init__(self, app: BrokenIconApp):
         super().__init__()
@@ -429,6 +430,20 @@ class IconDoctorRow(QFrame):
             self._fix_btn.setStyleSheet(f"color: {p.success};")
             self._status.setText("Fixed")
             self._status.setStyleSheet(f"color: {p.success};")
+        elif "not installed" in msg.lower():
+            # Stale .desktop entry — offer to remove it
+            self._fix_btn.setEnabled(True)
+            self._fix_btn.setText("Remove Entry")
+            self._fix_btn.setFixedWidth(100)
+            self._fix_btn.setStyleSheet(f"color: {p.warning};")
+            self._fix_btn.setToolTip("Delete the stale .desktop file for this app")
+            try:
+                self._fix_btn.clicked.disconnect()
+            except RuntimeError:
+                pass
+            self._fix_btn.clicked.connect(lambda: self.remove_requested.emit(self.app))
+            self._status.setText("App not installed")
+            self._status.setStyleSheet(f"color: {p.warning};")
         else:
             self._fix_btn.setText("✕")
             self._fix_btn.setStyleSheet(f"color: {p.danger};")
@@ -538,6 +553,7 @@ class IconDoctorSection(QFrame):
         for app in apps:
             row = IconDoctorRow(app)
             row.fix_requested.connect(self._fix_one)
+            row.remove_requested.connect(self._remove_entry)
             self._results_layout.addWidget(row)
             self._rows.append(row)
 
@@ -585,6 +601,44 @@ class IconDoctorSection(QFrame):
         row = next((r for r in self._rows if r.app.icon_name == icon_name), None)
         if row:
             row.set_result(success, msg)
+
+    def _remove_entry(self, app: BrokenIconApp):
+        from pathlib import Path
+        confirm = QMessageBox(self.window())
+        confirm.setWindowTitle("Remove Stale Entry")
+        confirm.setIcon(QMessageBox.Icon.Question)
+        confirm.setText(
+            f"<b>{app.name}</b> is no longer installed.<br><br>"
+            f"Remove its launcher entry?<br>"
+            f"<code>{app.desktop_file}</code>"
+        )
+        confirm.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+        )
+        confirm.button(QMessageBox.StandardButton.Yes).setText("Remove Entry")
+        if confirm.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            Path(app.desktop_file).unlink()
+        except OSError as e:
+            QMessageBox.warning(self.window(), "Error", f"Could not remove entry:\n{e}")
+            return
+
+        row = next((r for r in self._rows if r.app.icon_name == app.icon_name), None)
+        if row:
+            self._rows.remove(row)
+            row.deleteLater()
+
+        remaining = len(self._rows)
+        if remaining == 0:
+            self._results.setVisible(False)
+            self._fix_all_btn.setVisible(False)
+            self._status.setText("All issues resolved.")
+            self._status.setStyleSheet(f"color: {Theme.p().success};")
+        else:
+            self._status.setText(f"{remaining} app(s) with missing icons")
+            self._status.setStyleSheet("")
 
     def _clear_rows(self):
         for row in self._rows:

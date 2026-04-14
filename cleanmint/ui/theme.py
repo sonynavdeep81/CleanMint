@@ -54,8 +54,8 @@ DARK = Palette(
     bg_sidebar="#151924",
 
     text_primary="#e8eaf0",
-    text_secondary="#b0b8cc",
-    text_muted="#6b7694",
+    text_secondary="#c4cce0",
+    text_muted="#9ba5bf",
 
     accent="#3ddc84",
     accent_hover="#34c474",
