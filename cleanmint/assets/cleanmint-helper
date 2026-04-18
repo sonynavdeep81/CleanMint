@@ -39,12 +39,12 @@ case "$OPERATION" in
         exec /usr/bin/snap remove --revision "$2" "$1"
         ;;
     snap-refresh-all)
-        exec /usr/bin/snap refresh
+        exec /usr/bin/snap refresh --ignore-running
         ;;
     snap-refresh-pkg)
         # Args: <name>
         [[ $# -ge 1 ]] || { echo "snap-refresh-pkg requires <name>" >&2; exit 1; }
-        exec /usr/bin/snap refresh "$1"
+        exec /usr/bin/snap refresh --ignore-running "$1"
         ;;
     systemctl-restart)
         # Args: <service>
