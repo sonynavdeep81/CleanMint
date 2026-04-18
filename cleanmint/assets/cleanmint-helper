@@ -18,10 +18,33 @@ case "$OPERATION" in
     apt-clean)
         exec /usr/bin/apt-get clean
         ;;
+    apt-update)
+        exec /usr/bin/apt-get update
+        ;;
+    apt-upgrade)
+        exec /usr/bin/apt-get upgrade -y \
+            -o "Dpkg::Options::=--force-confdef" \
+            -o "Dpkg::Options::=--force-confold"
+        ;;
+    apt-upgrade-pkgs)
+        # Args: <pkg1> <pkg2> ...
+        [[ $# -ge 1 ]] || { echo "apt-upgrade-pkgs requires package names" >&2; exit 1; }
+        exec /usr/bin/apt-get install --only-upgrade -y \
+            -o "Dpkg::Options::=--force-confdef" \
+            -o "Dpkg::Options::=--force-confold" "$@"
+        ;;
     snap-remove)
         # Args: <name> <revision>
         [[ $# -ge 2 ]] || { echo "snap-remove requires <name> <revision>" >&2; exit 1; }
         exec /usr/bin/snap remove --revision "$2" "$1"
+        ;;
+    snap-refresh-all)
+        exec /usr/bin/snap refresh
+        ;;
+    snap-refresh-pkg)
+        # Args: <name>
+        [[ $# -ge 1 ]] || { echo "snap-refresh-pkg requires <name>" >&2; exit 1; }
+        exec /usr/bin/snap refresh "$1"
         ;;
     systemctl-restart)
         # Args: <service>
@@ -45,8 +68,9 @@ case "$OPERATION" in
         ;;
     *)
         echo "cleanmint-helper: unknown operation '${OPERATION}'" >&2
-        echo "Valid: journal-vacuum, apt-clean, snap-remove, snap-uninstall," >&2
-        echo "       apt-remove, flatpak-uninstall, systemctl-restart" >&2
+        echo "Valid: journal-vacuum, apt-clean, apt-update, apt-upgrade, apt-upgrade-pkgs," >&2
+        echo "       snap-remove, snap-uninstall, apt-remove," >&2
+        echo "       flatpak-uninstall, systemctl-restart" >&2
         exit 1
         ;;
 esac

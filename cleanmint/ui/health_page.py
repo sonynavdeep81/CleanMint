@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QProgressBar, QSizePolicy,
     QDialog, QTextEdit, QDialogButtonBox, QMessageBox,
+    QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
@@ -32,46 +33,76 @@ class AptUpgradeWorker(QThread):
     line_ready = pyqtSignal(str)
     finished   = pyqtSignal(bool, str)   # success, summary
 
+    def __init__(self, packages: list[str] | None = None):
+        super().__init__()
+        self._packages = packages  # None = upgrade all; list = upgrade only these
+
+    _HELPER = "/usr/local/lib/cleanmint/cleanmint-helper"
+
     def run(self):
-        import subprocess
+        import subprocess, os
         env = {"DEBIAN_FRONTEND": "noninteractive", "PATH": "/usr/bin:/bin"}
-        steps = [
-            (["pkexec", "/usr/bin/apt-get", "update", "-y"],          "Updating package lists…"),
-            (["pkexec", "/usr/bin/apt-get", "upgrade", "-y",
-              "-o", "Dpkg::Options::=--force-confdef",
-              "-o", "Dpkg::Options::=--force-confold"], "Upgrading packages…"),
-        ]
-        import os
         full_env = {**os.environ, **env}
-        for cmd, label in steps:
-            self.line_ready.emit(f"\n── {label} ──\n")
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    env=full_env,
+
+        if self._packages:
+            upgrade_cmd = ["pkexec", self._HELPER, "apt-upgrade-pkgs"] + self._packages
+            upgrade_label = f"Upgrading {len(self._packages)} package(s)…"
+        else:
+            upgrade_cmd = ["pkexec", self._HELPER, "apt-upgrade"]
+            upgrade_label = "Upgrading all packages…"
+
+        # Step 1: apt-get update (non-fatal — cached lists are fine if mirrors are rate-limiting)
+        self.line_ready.emit("\n── Updating package lists… ──\n")
+        try:
+            proc = subprocess.Popen(
+                ["pkexec", self._HELPER, "apt-update"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, env=full_env,
+            )
+            for line in proc.stdout:
+                self.line_ready.emit(line.rstrip())
+            proc.wait()
+            if proc.returncode != 0:
+                self.line_ready.emit(
+                    f"\n⚠ apt update exited {proc.returncode} — proceeding with cached lists.\n"
                 )
-                for line in proc.stdout:
-                    self.line_ready.emit(line.rstrip())
-                proc.wait()
-                if proc.returncode != 0:
-                    self.finished.emit(False, f"Command failed (exit {proc.returncode})")
-                    return
-            except Exception as e:
-                self.finished.emit(False, str(e))
+        except Exception as e:
+            self.line_ready.emit(f"\n⚠ apt update error: {e} — proceeding with cached lists.\n")
+
+        # Step 2: upgrade (fatal if this fails)
+        self.line_ready.emit(f"\n── {upgrade_label} ──\n")
+        try:
+            proc = subprocess.Popen(
+                upgrade_cmd,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, env=full_env,
+            )
+            for line in proc.stdout:
+                self.line_ready.emit(line.rstrip())
+            proc.wait()
+            if proc.returncode != 0:
+                self.finished.emit(False, f"Upgrade failed (exit {proc.returncode})")
                 return
-        self.finished.emit(True, "All packages updated successfully.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+            return
+
+        summary = (
+            f"{len(self._packages)} package(s) updated successfully."
+            if self._packages else "All packages updated successfully."
+        )
+        self.finished.emit(True, summary)
 
 
-class AptUpgradeDialog(QDialog):
-    def __init__(self, parent=None):
+class StreamingDialog(QDialog):
+    """Generic dialog that streams stdout from a QThread worker."""
+
+    def __init__(self, title: str, worker: QThread, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Updating & Upgrading Packages")
+        self.setWindowTitle(title)
         self.setMinimumSize(680, 480)
         self.setStyleSheet(Theme.stylesheet())
-        self._worker = None
+        self._worker = worker
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 20, 20, 20)
@@ -82,7 +113,7 @@ class AptUpgradeDialog(QDialog):
         lay.addWidget(self._status)
 
         self._progress = QProgressBar()
-        self._progress.setRange(0, 0)   # indeterminate
+        self._progress.setRange(0, 0)
         self._progress.setFixedHeight(6)
         lay.addWidget(self._progress)
 
@@ -98,7 +129,6 @@ class AptUpgradeDialog(QDialog):
         lay.addWidget(self._btns)
 
     def start(self):
-        self._worker = AptUpgradeWorker()
         self._worker.line_ready.connect(self._append)
         self._worker.finished.connect(self._on_done)
         self._worker.start()
@@ -119,6 +149,223 @@ class AptUpgradeDialog(QDialog):
         else:
             self._status.setText(f"Failed — {summary}")
             self._status.setStyleSheet(f"color: {Theme.p().danger};")
+
+
+class SnapRefreshWorker(QThread):
+    line_ready = pyqtSignal(str)
+    finished   = pyqtSignal(bool, str)
+
+    _HELPER = "/usr/local/lib/cleanmint/cleanmint-helper"
+
+    def __init__(self, packages: list[str] | None = None):
+        super().__init__()
+        self._packages = packages
+
+    def run(self):
+        import subprocess, os
+        full_env = {**os.environ}
+        pkg_list = self._packages or []
+
+        if pkg_list:
+            for pkg in pkg_list:
+                self.line_ready.emit(f"\n── Refreshing {pkg}… ──\n")
+                try:
+                    proc = subprocess.Popen(
+                        ["pkexec", self._HELPER, "snap-refresh-pkg", pkg],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, env=full_env,
+                    )
+                    for line in proc.stdout:
+                        self.line_ready.emit(line.rstrip())
+                    proc.wait()
+                    if proc.returncode != 0:
+                        self.line_ready.emit(f"⚠ Failed to refresh {pkg} (exit {proc.returncode})")
+                except Exception as e:
+                    self.line_ready.emit(f"⚠ Error refreshing {pkg}: {e}")
+            self.finished.emit(True, f"{len(pkg_list)} snap(s) refreshed.")
+        else:
+            self.line_ready.emit("\n── Refreshing all snaps… ──\n")
+            try:
+                proc = subprocess.Popen(
+                    ["pkexec", self._HELPER, "snap-refresh-all"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, env=full_env,
+                )
+                for line in proc.stdout:
+                    self.line_ready.emit(line.rstrip())
+                proc.wait()
+                if proc.returncode != 0:
+                    self.finished.emit(False, f"Snap refresh failed (exit {proc.returncode})")
+                    return
+            except Exception as e:
+                self.finished.emit(False, str(e))
+                return
+            self.finished.emit(True, "All snaps refreshed.")
+
+
+class FlatpakUpdateWorker(QThread):
+    line_ready = pyqtSignal(str)
+    finished   = pyqtSignal(bool, str)
+
+    def __init__(self, packages: list[str] | None = None):
+        super().__init__()
+        self._packages = packages
+
+    def run(self):
+        import subprocess, os
+        full_env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+        pkg_list = self._packages or []
+
+        if pkg_list:
+            for app_id in pkg_list:
+                self.line_ready.emit(f"\n── Updating {app_id}… ──\n")
+                try:
+                    proc = subprocess.Popen(
+                        ["flatpak", "update", "-y", "--noninteractive", app_id],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, env=full_env,
+                    )
+                    for line in proc.stdout:
+                        self.line_ready.emit(line.rstrip())
+                    proc.wait()
+                    if proc.returncode != 0:
+                        self.line_ready.emit(f"⚠ Failed to update {app_id} (exit {proc.returncode})")
+                except Exception as e:
+                    self.line_ready.emit(f"⚠ Error updating {app_id}: {e}")
+            self.finished.emit(True, f"{len(pkg_list)} Flatpak(s) updated.")
+        else:
+            self.line_ready.emit("\n── Updating all Flatpaks… ──\n")
+            try:
+                proc = subprocess.Popen(
+                    ["flatpak", "update", "-y", "--noninteractive"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, env=full_env,
+                )
+                for line in proc.stdout:
+                    self.line_ready.emit(line.rstrip())
+                proc.wait()
+                if proc.returncode != 0:
+                    self.finished.emit(False, f"Flatpak update failed (exit {proc.returncode})")
+                    return
+            except Exception as e:
+                self.finished.emit(False, str(e))
+                return
+            self.finished.emit(True, "All Flatpaks updated.")
+
+
+class PackageSelectDialog(QDialog):
+    """Shows upgradable packages as a checklist; lets user pick which to upgrade."""
+
+    def __init__(self, packages: list[tuple], upgrade_callback,
+                 title="Select Packages to Upgrade", button_label="Upgrade Selected",
+                 parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(640, 520)
+        self.setStyleSheet(Theme.stylesheet())
+        self._packages = packages  # list of (name, new_ver)
+        self._upgrade_callback = upgrade_callback
+        self._button_label = button_label
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(12)
+
+        # Header
+        hdr = QHBoxLayout()
+        title = QLabel(f"{len(packages)} packages available to upgrade")
+        title.setFont(QFont("Inter", 13, QFont.Weight.Bold))
+        hdr.addWidget(title, 1)
+
+        sel_all = QPushButton("Select All")
+        sel_all.setObjectName("SecondaryBtn")
+        sel_all.setFixedHeight(28)
+        sel_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        sel_all.clicked.connect(self._select_all)
+        hdr.addWidget(sel_all)
+
+        desel_all = QPushButton("Deselect All")
+        desel_all.setObjectName("SecondaryBtn")
+        desel_all.setFixedHeight(28)
+        desel_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        desel_all.clicked.connect(self._deselect_all)
+        hdr.addWidget(desel_all)
+        lay.addLayout(hdr)
+
+        sub = QLabel("Check the packages you want to upgrade, then click Upgrade Selected.")
+        sub.setObjectName("MutedLabel")
+        lay.addWidget(sub)
+
+        # Package list
+        self._list = QListWidget()
+        self._list.setObjectName("Card")
+        self._list.setSpacing(2)
+        self._list.setFont(QFont("Monospace", 10))
+        for name, new_ver in packages:
+            text = f"  {name}" + (f"  →  {new_ver}" if new_ver else "")
+            item = QListWidgetItem(text)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            self._list.addItem(item)
+        self._list.itemChanged.connect(self._on_item_changed)
+        lay.addWidget(self._list, 1)
+
+        # Selected count label
+        self._sel_label = QLabel()
+        self._sel_label.setObjectName("MutedLabel")
+        lay.addWidget(self._sel_label)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("SecondaryBtn")
+        cancel_btn.setFixedHeight(32)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        self._upgrade_btn = QPushButton(self._button_label)
+        self._upgrade_btn.setObjectName("DangerBtn")
+        self._upgrade_btn.setFixedHeight(32)
+        self._upgrade_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._upgrade_btn.clicked.connect(self._on_upgrade)
+        btn_row.addWidget(self._upgrade_btn)
+        lay.addLayout(btn_row)
+
+        # Now safe to update label since _upgrade_btn exists
+        self._update_sel_label()
+
+    def _select_all(self):
+        for i in range(self._list.count()):
+            self._list.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _deselect_all(self):
+        for i in range(self._list.count()):
+            self._list.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _on_item_changed(self, _item):
+        self._update_sel_label()
+
+    def _update_sel_label(self):
+        count = sum(
+            1 for i in range(self._list.count())
+            if self._list.item(i).checkState() == Qt.CheckState.Checked
+        )
+        self._upgrade_btn.setEnabled(count > 0)
+        self._sel_label.setText(f"{count} of {self._list.count()} packages selected")
+
+    def _on_upgrade(self):
+        selected = [
+            self._list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._list.count())
+            if self._list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        if not selected:
+            return
+        self.accept()
+        self._upgrade_callback(selected)
 
 
 class HealthRow(QFrame):
@@ -165,13 +412,12 @@ class HealthRow(QFrame):
         # Action buttons
         if check.id == "failed_services" and check.services:
             self._add_service_buttons(h, check)
-        elif check.id == "updates" and check.fix_label:
-            fix_btn = QPushButton(check.fix_label)
-            fix_btn.setObjectName("SecondaryBtn")
-            fix_btn.setFixedHeight(30)
-            fix_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            fix_btn.clicked.connect(lambda: self._show_apt_upgrade_dialog())
-            h.addWidget(fix_btn)
+        elif check.id == "updates" and check.packages:
+            self._add_update_buttons(h, check)
+        elif check.id == "snap_updates" and check.packages:
+            self._add_snap_buttons(h, check)
+        elif check.id == "flatpak_updates" and check.packages:
+            self._add_flatpak_buttons(h, check)
         elif check.fix_cmd and check.fix_label:
             fix_btn = QPushButton(check.fix_label)
             fix_btn.setObjectName("SecondaryBtn")
@@ -181,25 +427,128 @@ class HealthRow(QFrame):
             fix_btn.clicked.connect(lambda: self._show_terminal_cmd(check.fix_cmd))
             h.addWidget(fix_btn)
 
+    def _add_update_buttons(self, layout: QHBoxLayout, check: HealthCheck):
+        btn_widget = QWidget()
+        btn_col = QVBoxLayout(btn_widget)
+        btn_col.setContentsMargins(0, 0, 0, 0)
+        btn_col.setSpacing(4)
+
+        select_btn = QPushButton("Select Packages")
+        select_btn.setObjectName("SecondaryBtn")
+        select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        select_btn.clicked.connect(lambda: self._show_package_select_dialog(check.packages))
+        btn_col.addWidget(select_btn)
+
+        upgrade_all_btn = QPushButton("Update All")
+        upgrade_all_btn.setObjectName("SecondaryBtn")
+        upgrade_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        upgrade_all_btn.clicked.connect(lambda: self._show_apt_upgrade_dialog())
+        btn_col.addWidget(upgrade_all_btn)
+
+        layout.addWidget(btn_widget)
+
+    def _add_snap_buttons(self, layout: QHBoxLayout, check: HealthCheck):
+        btn_widget = QWidget()
+        btn_col = QVBoxLayout(btn_widget)
+        btn_col.setContentsMargins(0, 0, 0, 0)
+        btn_col.setSpacing(4)
+
+        select_btn = QPushButton("Select Snaps")
+        select_btn.setObjectName("SecondaryBtn")
+        select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        select_btn.clicked.connect(lambda: self._show_snap_select_dialog(check.packages))
+        btn_col.addWidget(select_btn)
+
+        refresh_all_btn = QPushButton("Refresh All")
+        refresh_all_btn.setObjectName("SecondaryBtn")
+        refresh_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh_all_btn.clicked.connect(lambda: self._open_streaming_dialog(
+            "Refreshing All Snaps", SnapRefreshWorker()
+        ))
+        btn_col.addWidget(refresh_all_btn)
+        layout.addWidget(btn_widget)
+
+    def _add_flatpak_buttons(self, layout: QHBoxLayout, check: HealthCheck):
+        btn_widget = QWidget()
+        btn_col = QVBoxLayout(btn_widget)
+        btn_col.setContentsMargins(0, 0, 0, 0)
+        btn_col.setSpacing(4)
+
+        select_btn = QPushButton("Select Flatpaks")
+        select_btn.setObjectName("SecondaryBtn")
+        select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        select_btn.clicked.connect(lambda: self._show_flatpak_select_dialog(check.packages))
+        btn_col.addWidget(select_btn)
+
+        update_all_btn = QPushButton("Update All")
+        update_all_btn.setObjectName("SecondaryBtn")
+        update_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        update_all_btn.clicked.connect(lambda: self._open_streaming_dialog(
+            "Updating All Flatpaks", FlatpakUpdateWorker()
+        ))
+        btn_col.addWidget(update_all_btn)
+        layout.addWidget(btn_widget)
+
+    def _open_streaming_dialog(self, title: str, worker: QThread):
+        dlg = StreamingDialog(title, worker, self.window())
+        dlg.show()
+        dlg.start()
+
+    def _show_package_select_dialog(self, packages: list[tuple]):
+        dlg = PackageSelectDialog(
+            packages,
+            upgrade_callback=lambda pkgs: self._open_streaming_dialog(
+                f"Upgrading {len(pkgs)} Package(s)", AptUpgradeWorker(packages=pkgs)
+            ),
+            title="Select APT Packages to Upgrade",
+            button_label="Upgrade Selected",
+            parent=self.window(),
+        )
+        dlg.exec()
+
+    def _show_snap_select_dialog(self, packages: list[tuple]):
+        dlg = PackageSelectDialog(
+            packages,
+            upgrade_callback=lambda pkgs: self._open_streaming_dialog(
+                f"Refreshing {len(pkgs)} Snap(s)", SnapRefreshWorker(packages=pkgs)
+            ),
+            title="Select Snaps to Refresh",
+            button_label="Refresh Selected",
+            parent=self.window(),
+        )
+        dlg.exec()
+
+    def _show_flatpak_select_dialog(self, packages: list[tuple]):
+        dlg = PackageSelectDialog(
+            packages,
+            upgrade_callback=lambda pkgs: self._open_streaming_dialog(
+                f"Updating {len(pkgs)} Flatpak(s)", FlatpakUpdateWorker(packages=pkgs)
+            ),
+            title="Select Flatpaks to Update",
+            button_label="Update Selected",
+            parent=self.window(),
+        )
+        dlg.exec()
+
     def _add_service_buttons(self, layout: QHBoxLayout, check: HealthCheck):
-        btn_col = QVBoxLayout()
+        btn_widget = QWidget()
+        btn_col = QVBoxLayout(btn_widget)
+        btn_col.setContentsMargins(0, 0, 0, 0)
         btn_col.setSpacing(4)
 
         status_btn = QPushButton("Show Status")
         status_btn.setObjectName("SecondaryBtn")
-        status_btn.setFixedHeight(26)
         status_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         status_btn.clicked.connect(lambda: self._show_service_status(check.services))
         btn_col.addWidget(status_btn)
 
         restart_btn = QPushButton("Restart Services")
         restart_btn.setObjectName("SecondaryBtn")
-        restart_btn.setFixedHeight(26)
         restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         restart_btn.clicked.connect(lambda: self._restart_services(check.services))
         btn_col.addWidget(restart_btn)
 
-        layout.addLayout(btn_col)
+        layout.addWidget(btn_widget)
 
     def _show_service_status(self, services: list):
         import subprocess
@@ -285,10 +634,10 @@ class HealthRow(QFrame):
 
     def _show_apt_upgrade_dialog(self):
         confirm = QMessageBox(self.window())
-        confirm.setWindowTitle("Update & Upgrade Packages")
+        confirm.setWindowTitle("Update & Upgrade All Packages")
         confirm.setIcon(QMessageBox.Icon.Question)
         confirm.setText(
-            "<b>Update and upgrade all packages?</b><br><br>"
+            "<b>Update and upgrade all APT packages?</b><br><br>"
             "This will run <code>apt update</code> then <code>apt upgrade</code>.<br><br>"
             "<b>What happens:</b><br>"
             "• Package lists are refreshed from Ubuntu's servers<br>"
@@ -303,10 +652,9 @@ class HealthRow(QFrame):
         confirm.button(QMessageBox.StandardButton.Ok).setText("Update Now")
         if confirm.exec() != QMessageBox.StandardButton.Ok:
             return
-
-        dlg = AptUpgradeDialog(self.window())
-        dlg.show()
-        dlg.start()
+        self._open_streaming_dialog(
+            "Updating & Upgrading All Packages", AptUpgradeWorker()
+        )
 
     def _show_terminal_cmd(self, cmd: list):
         from PyQt6.QtWidgets import QMessageBox

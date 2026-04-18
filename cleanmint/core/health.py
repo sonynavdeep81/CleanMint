@@ -21,6 +21,7 @@ class HealthCheck:
     fix_cmd: list[str] = field(default_factory=list)   # safe fix command if available
     fix_label: str = ""
     services: list[str] = field(default_factory=list)  # failed service names (for restart UI)
+    packages: list[tuple] = field(default_factory=list)  # (name, new_ver) for pending updates
 
 
 class HealthChecker:
@@ -30,12 +31,14 @@ class HealthChecker:
     def run_all(self) -> list[HealthCheck]:
         checks = []
         steps = [
-            ("Checking disk space…",         10, self.check_disk_space),
-            ("Checking broken packages…",    25, self.check_broken_packages),
-            ("Checking failed services…",    42, self.check_failed_services),
-            ("Checking old kernels…",        58, self.check_old_kernels),
-            ("Checking journal size…",       72, self.check_journal_size),
-            ("Checking package updates…",    86, self.check_pending_updates),
+            ("Checking disk space…",         8,  self.check_disk_space),
+            ("Checking broken packages…",    20, self.check_broken_packages),
+            ("Checking failed services…",    34, self.check_failed_services),
+            ("Checking old kernels…",        48, self.check_old_kernels),
+            ("Checking journal size…",       60, self.check_journal_size),
+            ("Checking APT updates…",        72, self.check_pending_updates),
+            ("Checking Snap updates…",       84, self.check_snap_updates),
+            ("Checking Flatpak updates…",    94, self.check_flatpak_updates),
         ]
         for msg, pct, fn in steps:
             self._progress(msg, pct)
@@ -215,6 +218,98 @@ class HealthChecker:
             status="info", detail="Could not determine journal size.",
         )
 
+    def check_snap_updates(self) -> HealthCheck:
+        try:
+            result = subprocess.run(
+                ["snap", "refresh", "--list"],
+                capture_output=True, text=True, timeout=30
+            )
+            packages: list[tuple] = []
+            for line in result.stdout.splitlines():
+                if not line.strip() or line.startswith("Name") or line.startswith("All"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    packages.append((parts[0], parts[1]))
+
+            if not packages:
+                return HealthCheck(
+                    id="snap_updates", title="Snap Updates",
+                    status="ok", detail="All snaps are up to date.",
+                )
+            names_preview = ", ".join(p[0] for p in packages[:3])
+            extra = f" +{len(packages) - 3} more" if len(packages) > 3 else ""
+            return HealthCheck(
+                id="snap_updates", title="Snap Updates",
+                status="warning" if len(packages) > 5 else "info",
+                detail=f"{len(packages)} snap(s) can be refreshed: {names_preview}{extra}.",
+                packages=packages,
+            )
+        except FileNotFoundError:
+            return HealthCheck(
+                id="snap_updates", title="Snap Updates",
+                status="ok", detail="Snap is not installed.",
+            )
+        except Exception as e:
+            return HealthCheck(
+                id="snap_updates", title="Snap Updates",
+                status="info", detail=f"Could not check snap updates: {e}",
+            )
+
+    def check_flatpak_updates(self) -> HealthCheck:
+        try:
+            remotes_result = subprocess.run(
+                ["flatpak", "remotes", "--columns=name"],
+                capture_output=True, text=True, timeout=10
+            )
+            remotes = [
+                l.strip() for l in remotes_result.stdout.splitlines()
+                if l.strip() and l.strip().lower() != "name"
+            ]
+            if not remotes:
+                return HealthCheck(
+                    id="flatpak_updates", title="Flatpak Updates",
+                    status="ok", detail="No Flatpak remotes configured.",
+                )
+
+            packages: list[tuple] = []
+            seen: set[str] = set()
+            for remote in remotes:
+                r = subprocess.run(
+                    ["flatpak", "remote-ls", remote, "--updates",
+                     "--columns=application,version"],
+                    capture_output=True, text=True, timeout=20
+                )
+                for line in r.stdout.splitlines():
+                    parts = line.split()
+                    if parts and parts[0] not in seen:
+                        seen.add(parts[0])
+                        packages.append((parts[0], parts[1] if len(parts) > 1 else ""))
+
+            if not packages:
+                return HealthCheck(
+                    id="flatpak_updates", title="Flatpak Updates",
+                    status="ok", detail="All Flatpaks are up to date.",
+                )
+            names_preview = ", ".join(p[0].split(".")[-1] for p in packages[:3])
+            extra = f" +{len(packages) - 3} more" if len(packages) > 3 else ""
+            return HealthCheck(
+                id="flatpak_updates", title="Flatpak Updates",
+                status="warning" if len(packages) > 5 else "info",
+                detail=f"{len(packages)} Flatpak(s) can be updated: {names_preview}{extra}.",
+                packages=packages,
+            )
+        except FileNotFoundError:
+            return HealthCheck(
+                id="flatpak_updates", title="Flatpak Updates",
+                status="ok", detail="Flatpak is not installed.",
+            )
+        except Exception as e:
+            return HealthCheck(
+                id="flatpak_updates", title="Flatpak Updates",
+                status="info", detail=f"Could not check Flatpak updates: {e}",
+            )
+
     def check_pending_updates(self) -> HealthCheck:
         try:
             result = subprocess.run(
@@ -224,19 +319,33 @@ class HealthChecker:
             m = re.search(r"(\d+) upgraded", result.stdout)
             count = int(m.group(1)) if m else 0
 
+            packages: list[tuple] = []
+            for line in result.stdout.splitlines():
+                if line.startswith("Inst "):
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    name = parts[1]
+                    new_ver = ""
+                    for part in parts[2:]:
+                        if part.startswith("("):
+                            new_ver = part.lstrip("(")
+                            break
+                    packages.append((name, new_ver))
+
             if count > 50:
                 return HealthCheck(
                     id="updates", title="Pending Updates",
                     status="warning",
                     detail=f"{count} packages can be upgraded.",
-                    fix_cmd=["sudo", "apt", "upgrade"],
-                    fix_label="Run apt upgrade",
+                    packages=packages,
                 )
             elif count > 0:
                 return HealthCheck(
                     id="updates", title="Pending Updates",
                     status="info",
                     detail=f"{count} packages can be upgraded.",
+                    packages=packages,
                 )
             return HealthCheck(
                 id="updates", title="Pending Updates",
