@@ -6,7 +6,9 @@ systemd user services. Supports enable/disable toggles.
 Read-only scan; enable/disable writes only to XDG autostart files.
 """
 
+import json
 import os
+import shutil
 import subprocess
 import configparser
 from pathlib import Path
@@ -99,6 +101,24 @@ _SAFETY_KB: list[tuple[str, str, str]] = [
     ("gnome-shell",         "keep",    "The GNOME desktop shell itself. Do not disable."),
     ("gnome-screensaver",   "caution", "Screen lock/screensaver. Disable only if you use a different screen locker."),
     ("light-locker",        "caution", "Screen locker. Disable only if you use a different screen locker."),
+
+    # ── GNOME Shell extensions ─────────────────────────────────
+    ("ubuntu-appindicators", "keep",   "Adds system tray icon support (Wi-Fi, battery, Dropbox, etc.). Keep enabled if you use any tray apps."),
+    ("ubuntu-dock",          "caution","Ubuntu's side dock. Safe to disable if you prefer a different dock or launcher."),
+    ("tiling-assistant",     "safe",   "Adds window tiling helpers (snap windows to halves/quarters). Safe to disable if you don't use tiling."),
+    ("ding@rastersoft",      "safe",   "Desktop Icons NG — shows files and drives directly on your desktop. Safe to disable for a cleaner look."),
+    ("soft-brightness",      "safe",   "Controls screen brightness in software (useful when hardware brightness keys don't work). Safe to disable."),
+    ("blur-my-shell",        "safe",   "Adds blur effects to the GNOME shell. Safe to disable — purely cosmetic."),
+    ("dash-to-dock",         "caution","Replaces the default dock. Disable with care if it is your primary launcher."),
+    ("dash-to-panel",        "caution","Moves the dash into the top/bottom panel. Disable with care if it is your primary launcher."),
+    ("just-perfection",      "safe",   "Tweaks GNOME UI elements. Safe to disable."),
+    ("night-light-slider",   "safe",   "Adds a slider for the built-in Night Light strength. Safe to disable."),
+    ("caffeine",             "safe",   "Prevents the screen from sleeping when toggled on. Safe to disable."),
+    ("gsconnect",            "safe",   "Connects your Android phone to GNOME (KDE Connect for GNOME). Safe to disable if you don't use it."),
+    ("vitals",               "safe",   "Shows CPU/RAM/temperature in the top bar. Safe to disable."),
+    ("system-monitor",       "safe",   "Shows system resource usage in the top bar. Safe to disable."),
+    ("clipboard-indicator",  "safe",   "Clipboard history manager in the top bar. Safe to disable."),
+    ("user-theme",           "safe",   "Allows installing custom GNOME Shell themes. Safe to disable if you use the default theme."),
 ]
 
 
@@ -122,6 +142,8 @@ class StartupManager:
         entries += self._read_xdg_autostart(XDG_AUTOSTART_USER, source="xdg_user")
         self._progress("Reading systemd user services…", 60)
         entries += self._read_systemd_user()
+        self._progress("Reading GNOME Shell extensions…", 80)
+        entries += self._read_gnome_extensions()
         self._progress("Done.", 100)
         return entries
 
@@ -131,6 +153,7 @@ class StartupManager:
         For XDG system entries: copies to ~/.config/autostart with Hidden=true.
         For XDG user entries: sets Hidden=true in place.
         For systemd user: calls systemctl --user disable.
+        For GNOME extensions: calls gnome-extensions disable.
         Returns (success, message).
         """
         if entry.source == "xdg_system":
@@ -139,6 +162,8 @@ class StartupManager:
             return self._set_xdg_hidden(entry.path, True)
         elif entry.source == "systemd_user":
             return self._systemd_user_toggle(entry.id, enable=False)
+        elif entry.source == "gnome_extension":
+            return self._gnome_ext_toggle(entry.id, enable=False)
         return False, "Unknown source"
 
     def enable_entry(self, entry: StartupEntry) -> tuple[bool, str]:
@@ -149,6 +174,8 @@ class StartupManager:
             )
         elif entry.source == "systemd_user":
             return self._systemd_user_toggle(entry.id, enable=True)
+        elif entry.source == "gnome_extension":
+            return self._gnome_ext_toggle(entry.id, enable=True)
         return False, "Unknown source"
 
     # ── XDG autostart ──────────────────────────────────────────
@@ -274,5 +301,77 @@ class StartupManager:
             if result.returncode == 0:
                 return True, f"{action.capitalize()}d {unit}"
             return False, result.stderr.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            return False, str(e)
+
+    # ── GNOME Shell extensions ─────────────────────────────────
+
+    _EXT_SEARCH_PATHS = [
+        HOME / ".local" / "share" / "gnome-shell" / "extensions",
+        Path("/usr/share/gnome-shell/extensions"),
+    ]
+
+    def _read_gnome_extensions(self) -> list[StartupEntry]:
+        if not shutil.which("gnome-extensions"):
+            return []
+        try:
+            enabled_out = subprocess.run(
+                ["gnome-extensions", "list", "--enabled"],
+                capture_output=True, text=True, timeout=10,
+            )
+            enabled_uuids = {
+                line.strip() for line in enabled_out.stdout.splitlines() if line.strip()
+            }
+            all_out = subprocess.run(
+                ["gnome-extensions", "list"],
+                capture_output=True, text=True, timeout=10,
+            )
+            all_uuids = [
+                line.strip() for line in all_out.stdout.splitlines() if line.strip()
+            ]
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return []
+
+        entries = []
+        for uuid in sorted(all_uuids):
+            name = uuid
+            ext_path = None
+            for search in self._EXT_SEARCH_PATHS:
+                candidate = search / uuid
+                if candidate.is_dir():
+                    ext_path = candidate
+                    meta_file = candidate / "metadata.json"
+                    if meta_file.is_file():
+                        try:
+                            meta = json.loads(meta_file.read_text())
+                            name = meta.get("name", uuid)
+                        except Exception:
+                            pass
+                    break
+
+            safety, safety_detail = _classify_entry(uuid, name)
+            entries.append(StartupEntry(
+                id=uuid,
+                name=name,
+                description="GNOME Shell extension",
+                source="gnome_extension",
+                enabled=(uuid in enabled_uuids),
+                path=ext_path,
+                exec_cmd="",
+                safety=safety,
+                safety_detail=safety_detail,
+            ))
+        return entries
+
+    def _gnome_ext_toggle(self, uuid: str, enable: bool) -> tuple[bool, str]:
+        action = "enable" if enable else "disable"
+        try:
+            result = subprocess.run(
+                ["gnome-extensions", action, uuid],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                return True, f"{action.capitalize()}d {uuid}"
+            return False, result.stderr.strip() or f"Failed to {action} extension"
         except (FileNotFoundError, subprocess.TimeoutExpired) as e:
             return False, str(e)

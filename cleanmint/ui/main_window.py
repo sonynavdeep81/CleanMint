@@ -18,17 +18,18 @@ from core.installer import is_policy_installed, install_policy
 
 
 NAV_ITEMS = [
-    ("dashboard",  "⬡  Dashboard"),
-    ("cleaner",    "✦  Cleaner"),
-    ("analyzer",   "◈  Analyzer"),
-    ("apps",       "⊞  Apps"),
-    ("startup",    "⚡  Startup"),
-    ("health",     "♥  Health"),
-    ("snapshot",   "◉  Snapshots"),
-    ("vscode",     "⌨  VS Code"),
-    ("printer",    "⎙  Printer"),
-    ("settings",   "⚙  Settings"),
-    ("logs",       "▤  Logs"),
+    ("dashboard",   "⬡  Dashboard"),
+    ("cleaner",     "✦  Cleaner"),
+    ("analyzer",    "◈  Analyzer"),
+    ("apps",        "⊞  Apps"),
+    ("startup",     "⚡  Startup"),
+    ("health",      "♥  Health"),
+    ("snapshot",    "◉  Snapshots"),
+    ("vscode",      "⌨  VS Code"),
+    ("printer",     "⎙  Printer"),
+    ("screenshot",  "⊙  Screenshot"),
+    ("settings",    "⚙  Settings"),
+    ("logs",        "▤  Logs"),
 ]
 
 
@@ -183,6 +184,9 @@ class MainWindow(QMainWindow):
         elif key == "printer":
             from ui.printer_page import PrinterPage
             return PrinterPage()
+        elif key == "screenshot":
+            from ui.screenshot_page import ScreenshotPage
+            return ScreenshotPage()
         elif key == "settings":
             from ui.settings_page import SettingsPage
             return SettingsPage()

@@ -26,6 +26,7 @@ class SnapshotMeta:
     apt_count: int
     snap_count: int
     flatpak_count: int
+    gnome_ext_count: int
     path: Path
 
 
@@ -54,29 +55,45 @@ class SnapshotEngine:
         _prog("Collecting Flatpak packages…", 50)
         flatpaks = self._get_flatpak_packages()
 
-        _prog("Collecting PPA sources…", 65)
+        _prog("Collecting PPA sources…", 60)
         ppas = self._get_ppa_sources()
 
-        _prog("Saving snapshot data…", 80)
+        _prog("Collecting GNOME extensions…", 72)
+        gnome_exts = self._get_gnome_extensions()
+
+        _prog("Saving snapshot data…", 82)
         (snap_path / "apt_packages.txt").write_text("\n".join(apt))
         (snap_path / "snap_packages.txt").write_text("\n".join(snaps))
         (snap_path / "flatpak_packages.txt").write_text("\n".join(flatpaks))
         (snap_path / "ppa_sources.txt").write_text("\n".join(ppas))
+        ext_uuids = [e["uuid"] for e in gnome_exts]
+        (snap_path / "gnome_extensions.txt").write_text("\n".join(ext_uuids))
+
+        # Back up extension directories alongside the snapshot
+        if gnome_exts:
+            ext_backup = snap_path / "gnome_extensions"
+            ext_backup.mkdir(exist_ok=True)
+            for ext in gnome_exts:
+                src = ext.get("path")
+                if src and Path(src).is_dir():
+                    dst = ext_backup / ext["uuid"]
+                    shutil.copytree(src, dst, dirs_exist_ok=True)
 
         resolved_label = label.strip() or now.strftime("Snapshot %d %b %Y %H:%M")
         meta_dict = {
-            "label":         resolved_label,
-            "created_at":    now.isoformat(),
-            "hostname":      self._hostname(),
-            "distro":        self._distro(),
-            "apt_count":     len(apt),
-            "snap_count":    len(snaps),
-            "flatpak_count": len(flatpaks),
+            "label":           resolved_label,
+            "created_at":      now.isoformat(),
+            "hostname":        self._hostname(),
+            "distro":          self._distro(),
+            "apt_count":       len(apt),
+            "snap_count":      len(snaps),
+            "flatpak_count":   len(flatpaks),
+            "gnome_ext_count": len(gnome_exts),
         }
         (snap_path / "manifest.json").write_text(json.dumps(meta_dict, indent=2))
 
-        _prog("Generating restore script…", 92)
-        script = self._build_restore_script(meta_dict, apt, snaps, flatpaks, ppas)
+        _prog("Generating restore script…", 94)
+        script = self._build_restore_script(meta_dict, apt, snaps, flatpaks, ppas, ext_uuids)
         (snap_path / "restore.sh").write_text(script)
         os.chmod(snap_path / "restore.sh", 0o755)
 
@@ -91,6 +108,7 @@ class SnapshotEngine:
             apt_count=len(apt),
             snap_count=len(snaps),
             flatpak_count=len(flatpaks),
+            gnome_ext_count=len(gnome_exts),
             path=snap_path,
         )
 
@@ -114,6 +132,7 @@ class SnapshotEngine:
                     apt_count=m.get("apt_count", 0),
                     snap_count=m.get("snap_count", 0),
                     flatpak_count=m.get("flatpak_count", 0),
+                    gnome_ext_count=m.get("gnome_ext_count", 0),
                     path=entry,
                 ))
             except Exception:
@@ -141,9 +160,10 @@ class SnapshotEngine:
 
         result: dict = {}
         for category, fname in [
-            ("apt",     "apt_packages.txt"),
-            ("snap",    "snap_packages.txt"),
-            ("flatpak", "flatpak_packages.txt"),
+            ("apt",          "apt_packages.txt"),
+            ("snap",         "snap_packages.txt"),
+            ("flatpak",      "flatpak_packages.txt"),
+            ("gnome_extensions", "gnome_extensions.txt"),
         ]:
             a = _load(name_a, fname)
             b = _load(name_b, fname)
@@ -203,6 +223,34 @@ class SnapshotEngine:
         except Exception:
             return []
 
+    def _get_gnome_extensions(self) -> list[dict]:
+        """Return list of {uuid, path} for all enabled GNOME Shell extensions."""
+        if not shutil.which("gnome-extensions"):
+            return []
+        try:
+            result = subprocess.run(
+                ["gnome-extensions", "list", "--enabled"],
+                capture_output=True, text=True, timeout=10,
+            )
+            uuids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        except Exception:
+            return []
+
+        ext_search = [
+            Path.home() / ".local" / "share" / "gnome-shell" / "extensions",
+            Path("/usr/share/gnome-shell/extensions"),
+        ]
+        exts = []
+        for uuid in sorted(uuids):
+            path = None
+            for search in ext_search:
+                candidate = search / uuid
+                if candidate.is_dir():
+                    path = str(candidate)
+                    break
+            exts.append({"uuid": uuid, "path": path})
+        return exts
+
     def _get_ppa_sources(self) -> list[str]:
         sources: list[str] = []
         sources_dir = Path("/etc/apt/sources.list.d")
@@ -260,6 +308,7 @@ class SnapshotEngine:
         snaps: list[str],
         flatpaks: list[str],
         ppas: list[str],
+        gnome_exts: list[str] | None = None,
     ) -> str:
         created  = meta.get("created_at", "")[:10]
         label    = meta.get("label", "Snapshot")
@@ -325,6 +374,27 @@ class SnapshotEngine:
             for fp in flatpaks:
                 lines.append(f"flatpak install -y flathub '{fp}' || true")
             lines.append("")
+
+        if gnome_exts:
+            dconf_list = ", ".join(f"'{u}'" for u in gnome_exts)
+            lines += [
+                "# ── Restore GNOME Shell Extensions ────────────────────────────────────",
+                "echo 'Restoring GNOME extensions…'",
+                'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+                'EXT_DIR="$HOME/.local/share/gnome-shell/extensions"',
+                'mkdir -p "$EXT_DIR"',
+                '# Copy backed-up extension directories if present alongside this script',
+                'if [ -d "$SCRIPT_DIR/gnome_extensions" ]; then',
+                '  for ext_dir in "$SCRIPT_DIR/gnome_extensions"/*/; do',
+                '    uuid="$(basename "$ext_dir")"',
+                '    cp -r "$ext_dir" "$EXT_DIR/$uuid" 2>/dev/null || true',
+                '    echo "  Copied: $uuid"',
+                '  done',
+                'fi',
+                '# Enable all extensions via dconf (takes effect on next login)',
+                f'dconf write /org/gnome/shell/enabled-extensions "[{dconf_list}]" || true',
+                "",
+            ]
 
         lines += [
             'echo ""',

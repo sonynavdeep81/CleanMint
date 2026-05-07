@@ -241,9 +241,10 @@ class StartupPage(QWidget):
         self._table.setRowCount(len(entries))
 
         source_labels = {
-            "xdg_user":    "User",
-            "xdg_system":  "System",
-            "systemd_user":"systemd",
+            "xdg_user":       "User",
+            "xdg_system":     "System",
+            "systemd_user":   "systemd",
+            "gnome_extension":"GNOME Ext",
         }
         p = Theme.p()
 
