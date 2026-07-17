@@ -28,6 +28,7 @@ NAV_ITEMS = [
     ("vscode",      "⌨  VS Code"),
     ("printer",     "⎙  Printer"),
     ("screenshot",  "⊙  Screenshot"),
+    ("transcriber", "▶  Transcriber"),
     ("settings",    "⚙  Settings"),
     ("logs",        "▤  Logs"),
 ]
@@ -187,6 +188,9 @@ class MainWindow(QMainWindow):
         elif key == "screenshot":
             from ui.screenshot_page import ScreenshotPage
             return ScreenshotPage()
+        elif key == "transcriber":
+            from ui.transcriber_page import TranscriberPage
+            return TranscriberPage()
         elif key == "settings":
             from ui.settings_page import SettingsPage
             return SettingsPage()

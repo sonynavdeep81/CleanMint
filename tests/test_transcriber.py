@@ -107,3 +107,16 @@ def test_write_pdf(tmp_path):
 
 def test_whisper_available_bool():
     assert isinstance(whisper_available(), bool)
+
+
+# ---- UI smoke test (offscreen) ----
+
+def test_transcriber_page_constructs():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from ui.transcriber_page import TranscriberPage
+    page = TranscriberPage()
+    assert page._go_btn.isEnabled()
+    del app
