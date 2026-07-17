@@ -134,3 +134,76 @@ def fetch_captions(url: str, lang: str, is_auto: bool,
         except (json.JSONDecodeError, OSError):
             return None
         return segs or None
+
+
+def _fmt_duration(sec: int) -> str:
+    h, m, s = sec // 3600, (sec % 3600) // 60, sec % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _header_lines(meta: VideoMeta, source: str) -> list[str]:
+    return [meta.title,
+            f"Channel: {meta.channel}",
+            f"Date: {meta.upload_date}    Duration: {_fmt_duration(meta.duration)}",
+            f"URL: {meta.url}",
+            f"Transcript source: {source}"]
+
+
+def write_txt(meta: VideoMeta, paragraphs: list[str], source: str,
+              dest: Path = DOWNLOADS) -> Path:
+    path = dest / f"{sanitize_filename(meta.title)}-transcript.txt"
+    hdr = _header_lines(meta, source)
+    body = "\n".join(hdr) + "\n" + "=" * 60 + "\n\n" + "\n\n".join(paragraphs) + "\n"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def write_pdf(meta: VideoMeta, paragraphs: list[str], source: str,
+              dest: Path = DOWNLOADS) -> Path:
+    from xml.sax.saxutils import escape
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+    path = dest / f"{sanitize_filename(meta.title)}-transcript.pdf"
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle("Body", parent=styles["Normal"], fontSize=11,
+                                leading=16, spaceAfter=10)
+    meta_style = ParagraphStyle("Meta", parent=styles["Normal"], fontSize=9,
+                                textColor="#666666", spaceAfter=2)
+    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=2 * cm,
+                            rightMargin=2 * cm, topMargin=2 * cm,
+                            bottomMargin=2 * cm, title=meta.title)
+    story = [Paragraph(escape(meta.title), styles["Title"])]
+    for line in _header_lines(meta, source)[1:]:
+        story.append(Paragraph(escape(line), meta_style))
+    story.append(Spacer(1, 18))
+    story += [Paragraph(escape(p), body_style) for p in paragraphs]
+    doc.build(story)
+    return path
+
+
+def whisper_available() -> bool:
+    try:
+        import faster_whisper  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def whisper_transcribe(media_path: Path, duration: int,
+                       progress_cb=None) -> list[tuple[int, str]]:
+    """Transcribe with faster-whisper medium int8 on CPU. progress_cb(pct)."""
+    from faster_whisper import WhisperModel
+    model = WhisperModel("medium", device="cpu", compute_type="int8")
+    segments, _info = model.transcribe(str(media_path), beam_size=5,
+                                       temperature=0, vad_filter=True)
+    out = []
+    for seg in segments:            # generator — transcription happens here
+        text = seg.text.strip()
+        if text:
+            out.append((int(seg.start * 1000), text))
+        if progress_cb and duration:
+            progress_cb(min(99, int(seg.end / duration * 100)))
+    return out

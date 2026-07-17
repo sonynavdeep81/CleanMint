@@ -81,3 +81,29 @@ def test_pick_caption_auto_fallback():
 def test_pick_caption_none():
     info = {"subtitles": {}, "automatic_captions": {"fr": [{}]}}
     assert pick_caption_track(info) is None
+
+
+# ---- writers + whisper availability ----
+
+from core.transcriber import (  # noqa: E402
+    VideoMeta, write_txt, write_pdf, whisper_available)
+
+
+def _meta():
+    return VideoMeta("My Video", "Chan", "2026-01-01", 65, "http://u", {})
+
+
+def test_write_txt(tmp_path):
+    p = write_txt(_meta(), ["Para one.", "Para two."], "YouTube captions", tmp_path)
+    text = p.read_text()
+    assert p.name == "My Video-transcript.txt"
+    assert "My Video" in text and "Para one.\n\nPara two." in text and "1:05" in text
+
+
+def test_write_pdf(tmp_path):
+    p = write_pdf(_meta(), ["Para <one> & two."], "Whisper (medium)", tmp_path)
+    assert p.suffix == ".pdf" and p.stat().st_size > 500
+
+
+def test_whisper_available_bool():
+    assert isinstance(whisper_available(), bool)
