@@ -159,7 +159,7 @@ class TranscriberPage(QWidget):
         layout.addLayout(row)
 
         self._cookies_cb = QCheckBox(
-            "Use Chrome cookies (needed for age-restricted or members-only videos)"
+            "Use Chrome cookies (needed for age-restricted videos)"
         )
         layout.addWidget(self._cookies_cb)
 

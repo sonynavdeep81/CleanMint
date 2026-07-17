@@ -35,7 +35,7 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
   - Captions-first: uses YouTube captions when they exist (manual preferred over auto) — instant
   - Fallback: local faster-whisper `medium` (int8, CPU) when the video has no captions
     (~1–1.5× video length to process; 1.5 GB model downloaded once to `~/.cache/huggingface`)
-  - "Use Chrome cookies" checkbox for age-restricted/members-only videos
+  - "Use Chrome cookies" checkbox for age-restricted videos
   - Engine in `core/transcriber.py` (UI-free), page in `ui/transcriber_page.py`
 - **Settings page**: Dark/light mode, persistent JSON settings
 - **Logs page**: Shows CleanMint session logs with color-coded highlighting
