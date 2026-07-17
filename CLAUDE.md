@@ -30,6 +30,13 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
   - Restore script handles PPAs, apt, snap, flatpak in order; uses `|| true` so one failure never aborts the rest
 - **Printer Profile page**: Lists all configured CUPS printers with status details; exports a `restore_printers.sh` script to recreate printer configs on a new machine
 - **VS Code Profile page**: Shows all installed VS Code extensions (name, ID, version) + user `settings.json`; exports a `restore_vscode.sh` to reinstall extensions on any machine
+- **Transcriber page**: Paste a YouTube URL → downloads the video to `~/Downloads` (yt-dlp)
+  and saves a formatted transcript as `.txt` + `.pdf` next to it
+  - Captions-first: uses YouTube captions when they exist (manual preferred over auto) — instant
+  - Fallback: local faster-whisper `medium` (int8, CPU) when the video has no captions
+    (~1–1.5× video length to process; 1.5 GB model downloaded once to `~/.cache/huggingface`)
+  - "Use Chrome cookies" checkbox for age-restricted/members-only videos
+  - Engine in `core/transcriber.py` (UI-free), page in `ui/transcriber_page.py`
 - **Settings page**: Dark/light mode, persistent JSON settings
 - **Logs page**: Shows CleanMint session logs with color-coded highlighting
   - `[DELETED]` / `[SNAP REMOVED]` lines highlighted red — shows exactly what was removed
@@ -93,7 +100,7 @@ bash install.sh
 The installer automatically:
 1. Checks Python 3.10+ is available
 2. Creates a Python virtual environment
-3. Installs all dependencies: PyQt6, psutil, reportlab, send2trash
+3. Installs all dependencies: PyQt6, psutil, reportlab, send2trash, faster-whisper
 4. Installs the polkit policy (asks for your password **once**)
    — enables journal vacuum, snap cleanup, apt cache clean, service restart via pkexec
 5. Installs the custom app icon at all sizes (16 → 512 px)
@@ -261,7 +268,7 @@ Cleanmint/
 ## Environment
 - Python: 3.12.3
 - venv: `/home/navdeep/Cleanmint/venv`
-- Install: `venv/bin/pip install PyQt6 psutil reportlab send2trash`
+- Install: `venv/bin/pip install PyQt6 psutil reportlab send2trash faster-whisper`
 - OS: Ubuntu (Linux 6.14.0-29-generic)
 
 ---

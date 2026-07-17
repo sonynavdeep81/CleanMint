@@ -79,7 +79,7 @@ $PYTHON -m venv "$INSTALL_DIR/venv"
 ok "venv created"
 
 # ── 5. Install Python dependencies ──────────────────────────────
-info "Installing dependencies (PyQt6, psutil, reportlab, send2trash)…"
+info "Installing dependencies (PyQt6, psutil, reportlab, send2trash, faster-whisper)…"
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
 ok "Dependencies installed"
