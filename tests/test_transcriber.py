@@ -50,3 +50,34 @@ def test_build_paragraphs_splits_on_length():
 
 def test_build_paragraphs_empty():
     assert build_paragraphs([]) == []
+
+
+# ---- yt-dlp wrappers (command construction only, no network) ----
+
+from core.transcriber import _ytdlp_cmd, pick_caption_track  # noqa: E402
+
+
+def test_ytdlp_cmd_cookies():
+    cmd = _ytdlp_cmd(["--dump-json", "URL"], cookies=True)
+    assert cmd[0] == "yt-dlp" and "--cookies-from-browser" in cmd and "chrome" in cmd
+
+
+def test_ytdlp_cmd_no_cookies():
+    cmd = _ytdlp_cmd(["URL"])
+    assert "--cookies-from-browser" not in cmd and "--no-playlist" in cmd
+
+
+def test_pick_caption_prefers_manual():
+    info = {"subtitles": {"en": [{"ext": "json3"}]},
+            "automatic_captions": {"en": [{"ext": "json3"}]}}
+    assert pick_caption_track(info) == ("en", False)
+
+
+def test_pick_caption_auto_fallback():
+    info = {"subtitles": {}, "automatic_captions": {"en-orig": [{}], "de": [{}]}}
+    assert pick_caption_track(info) == ("en-orig", True)
+
+
+def test_pick_caption_none():
+    info = {"subtitles": {}, "automatic_captions": {"fr": [{}]}}
+    assert pick_caption_track(info) is None
