@@ -158,9 +158,52 @@ def write_txt(meta: VideoMeta, paragraphs: list[str], source: str,
     return path
 
 
+# Non-Latin scripts ReportLab's built-in fonts can't render, mapped to a
+# system TTF that covers them. Devanagari (Hindi/Marathi/etc. transcripts)
+# is the practical case; extend as other scripts come up.
+_SCRIPT_FONTS = {
+    "NotoDevanagari": (
+        re.compile(r"[ऀ-ॿ]+"),
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+    ),
+}
+_registered_fonts: set[str] = set()
+
+
+def _register_script_font(name: str, path: str) -> bool:
+    if name in _registered_fonts:
+        return True
+    if not Path(path).is_file():
+        return False
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    pdfmetrics.registerFont(TTFont(name, path))
+    _registered_fonts.add(name)
+    return True
+
+
+def _markup_unicode(text: str) -> str:
+    """Escape text for ReportLab and wrap runs in non-Latin scripts with a
+    font that can render them, so they don't show as missing-glyph boxes."""
+    from xml.sax.saxutils import escape
+    for font_name, (pattern, font_path) in _SCRIPT_FONTS.items():
+        if pattern.search(text) and not _register_script_font(font_name, font_path):
+            continue
+        if font_name not in _registered_fonts:
+            continue
+        parts, last = [], 0
+        for m in pattern.finditer(text):
+            parts.append(escape(text[last:m.start()]))
+            parts.append(f'<font face="{font_name}">{escape(m.group())}</font>')
+            last = m.end()
+        parts.append(escape(text[last:]))
+        text = "".join(parts)
+        return text
+    return escape(text)
+
+
 def write_pdf(meta: VideoMeta, paragraphs: list[str], source: str,
               dest: Path = DOWNLOADS) -> Path:
-    from xml.sax.saxutils import escape
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
@@ -175,11 +218,11 @@ def write_pdf(meta: VideoMeta, paragraphs: list[str], source: str,
     doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=2 * cm,
                             rightMargin=2 * cm, topMargin=2 * cm,
                             bottomMargin=2 * cm, title=meta.title)
-    story = [Paragraph(escape(meta.title), styles["Title"])]
+    story = [Paragraph(_markup_unicode(meta.title), styles["Title"])]
     for line in _header_lines(meta, source)[1:]:
-        story.append(Paragraph(escape(line), meta_style))
+        story.append(Paragraph(_markup_unicode(line), meta_style))
     story.append(Spacer(1, 18))
-    story += [Paragraph(escape(p), body_style) for p in paragraphs]
+    story += [Paragraph(_markup_unicode(p), body_style) for p in paragraphs]
     doc.build(story)
     return path
 
@@ -197,8 +240,11 @@ def whisper_transcribe(media_path: Path, duration: int,
     """Transcribe with faster-whisper medium int8 on CPU. progress_cb(pct)."""
     from faster_whisper import WhisperModel
     model = WhisperModel("medium", device="cpu", compute_type="int8")
-    segments, _info = model.transcribe(str(media_path), beam_size=5,
-                                       temperature=0, vad_filter=True)
+    segments, _info = model.transcribe(
+        str(media_path), beam_size=5, vad_filter=True,
+        temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+        condition_on_previous_text=False,
+        compression_ratio_threshold=2.4)
     out = []
     for seg in segments:            # generator — transcription happens here
         text = seg.text.strip()
