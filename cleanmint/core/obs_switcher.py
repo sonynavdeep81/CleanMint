@@ -182,3 +182,38 @@ def plan_shortcut_slots(
         plan.append((reuse, accel, name, want_cmd))
 
     return plan, final_list
+
+
+# ── Environment probes ─────────────────────────────────────────────────────
+
+def _run(cmd: list[str], timeout: int = 15, **kw) -> subprocess.CompletedProcess:
+    """subprocess.run wrapper: list-form only, captured, text, never shell."""
+    return subprocess.run(
+        cmd, capture_output=True, text=True, timeout=timeout, **kw
+    )
+
+
+def obs_running() -> bool:
+    try:
+        r = _run(["pgrep", "-f", "com.obsproject.Studio"], timeout=5)
+        return r.returncode == 0 and r.stdout.strip() != ""
+    except Exception:
+        return False
+
+
+def websocket_reachable(timeout: float = 1.0) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", WS_PORT), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def read_obs_password() -> str | None:
+    p = _paths()
+    try:
+        data = json.loads(p.obs_ws_config.read_text())
+        pw = data.get("server_password")
+        return pw if isinstance(pw, str) and pw else None
+    except Exception:
+        return None

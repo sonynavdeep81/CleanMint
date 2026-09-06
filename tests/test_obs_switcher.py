@@ -92,5 +92,33 @@ check("from empty: slots are custom0 and custom1",
       sorted(final2) == [_BASE + "custom0/", _BASE + "custom1/"])
 
 
+print("\n=== OBS Switcher — environment probes ===\n")
+
+home = new_home()
+p = ob._paths()
+
+# read_obs_password: no config yet
+check("read_obs_password None when config missing", ob.read_obs_password() is None)
+
+# create a fake OBS websocket config
+p.obs_ws_config.parent.mkdir(parents=True)
+p.obs_ws_config.write_text(json.dumps({
+    "server_enabled": True, "server_port": 4455,
+    "auth_required": True, "server_password": "s3cr3t",
+}))
+check("read_obs_password reads server_password", ob.read_obs_password() == "s3cr3t")
+
+# malformed config -> None, no raise
+p.obs_ws_config.write_text("{ not json")
+check("read_obs_password None on bad json", ob.read_obs_password() is None)
+
+# websocket_reachable: nothing listening on 4455 in CI
+check("websocket_reachable False when nothing listens",
+      ob.websocket_reachable(timeout=0.2) is False)
+
+# obs_running returns a bool and does not raise
+check("obs_running returns bool", isinstance(ob.obs_running(), bool))
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)
