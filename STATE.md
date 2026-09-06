@@ -1,5 +1,14 @@
 # STATE — resume pointer
 
+**Cleaner fix (merged ba6f84e):** "Free Space" showed snap/journal junk it never
+freed. Snap: blanket `_PROTECTED_SNAPS` hid ~2 GB of superseded revisions →
+now `list_removable_snap_revisions()` (removable iff snap has an active
+revision; shared by scanner + cleaner). Journal: scanner now reports
+`max(0, size-50MB)`. Bug #21 updated in CLAUDE.md. test_cleaner 23, scanner 32.
+Helper `snap-remove` present, policy current → user's re-scan + Free Space will
+now actually remove the ~1.87 GB of old core/mesa/gnome revisions.
+
+
 **Focus:** OBS Switcher feature — DONE + verified end-to-end on this machine.
 All merged to `main`; `main` is ~13 commits ahead of `origin/main` (not pushed).
 
