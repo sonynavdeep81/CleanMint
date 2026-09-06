@@ -411,6 +411,19 @@ check("v4l2 fail: feed NOT started", _feed == [])
 check("v4l2 fail: scene creation still ran",
       any("Scene" in s.label for s in s4))
 
+# feed can't write to the device -> surfaced as a failed step, scenes still made
+_feed.clear()
+ob._ensure_v4l2 = lambda: (True, "ready")
+ob._start_scrcpy_v4l2 = lambda: (False, "could not write to the virtual camera")
+ob._obs_py = lambda body, timeout=60: (
+    {"created_scenes": ["Tablet"], "created_sources": ["Tablet / Samsung Tablet"],
+     "replaced": [], "existing": [], "errors": []}, "")
+s5 = ob.setup_scenes()
+check("feed-write fail: reported as failed step",
+      any(s.label == "Tablet feed (scrcpy)" and not s.ok for s in s5))
+check("feed-write fail: scene + source still created",
+      sum(("Scene" in s.label or "Source" in s.label) for s in s5) >= 2)
+
 
 print("\n=== OBS Switcher — self_test ===\n")
 

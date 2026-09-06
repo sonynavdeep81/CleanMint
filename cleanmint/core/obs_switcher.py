@@ -931,21 +931,16 @@ def _setup_create_snippet() -> str:
         "except Exception as e:\n"
         "    res['errors'].append('Laptop source: %s' % e)\n"
         "try:\n"
-        "    items = c.get_scene_item_list('Tablet').scene_items\n"
-        "    good = [i for i in items if i.get('inputKind') == 'v4l2_input']\n"
-        "    if good:\n"
-        "        res['existing'].append('Tablet: ' + good[0]['sourceName'])\n"
-        "    else:\n"
-        "        for i in items:\n"
-        "            try:\n"
-        "                c.remove_input(i['sourceName'])\n"
+        "    for i in c.get_scene_item_list('Tablet').scene_items:\n"
+        "        try:\n"
+        "            c.remove_input(i['sourceName'])\n"
+        "            if i['sourceName'] != 'Samsung Tablet':\n"
         "                res['replaced'].append(i['sourceName'])\n"
-        "            except Exception as e:\n"
-        "                res['errors'].append('remove %s: %s' "
-        "% (i['sourceName'], e))\n"
-        f"        c.create_input('Tablet', 'Samsung Tablet', 'v4l2_input', "
+        "        except Exception:\n"
+        "            pass\n"
+        f"    c.create_input('Tablet', 'Samsung Tablet', 'v4l2_input', "
         f"{{'device_id': '{dev}'}}, True)\n"
-        "        res['created_sources'].append('Tablet / Samsung Tablet')\n"
+        "    res['created_sources'].append('Tablet / Samsung Tablet')\n"
         "except Exception as e:\n"
         "    res['errors'].append('Tablet source: %s' % e)\n"
         "# Fit every source to the canvas (no stripes / letterboxing).\n"
@@ -1021,8 +1016,45 @@ def scrcpy_v4l2_running() -> bool:
         return False
 
 
+def _scrcpy_log() -> Path:
+    d = _paths().home / ".cache" / "cleanmint"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "obs-scrcpy.log"
+
+
+# scrcpy can only write to the v4l2 device if nothing else has it open. OBS
+# holds it via the "Samsung Tablet" input, so that input must be removed first.
+_RELEASE_V4L2_SNIPPET = (
+    f"DEV = {V4L2_DEVICE!r}\n"
+    "released = []\n"
+    "for i in c.get_input_list().inputs:\n"
+    "    if i['inputKind'] != 'v4l2_input':\n"
+    "        continue\n"
+    "    try:\n"
+    "        s = c.get_input_settings(i['inputName']).input_settings\n"
+    "    except Exception:\n"
+    "        s = {}\n"
+    "    if s.get('device_id') == DEV:\n"
+    "        try:\n"
+    "            c.remove_input(i['inputName']); released.append(i['inputName'])\n"
+    "        except Exception:\n"
+    "            pass\n"
+    "print(json.dumps({'released': released}))\n"
+)
+
+_SCRCPY_ERR_MARKERS = (
+    "Failed to write header", "Could not send frame to v4l2 sink",
+    "Could not send packet to v4l2 sink", "ioctl(VIDIOC",
+)
+
+
 def _start_scrcpy_v4l2() -> tuple[bool, str]:
-    """(Re)start scrcpy feeding the tablet screen into the v4l2 device."""
+    """(Re)start scrcpy feeding the tablet screen into the v4l2 device.
+
+    Verifies the feed actually connected — a scrcpy that starts but cannot
+    write to the device (because something still holds it) is reported as a
+    failure, not a success.
+    """
     import time
     binary = _scrcpy_binary()
     if not binary:
@@ -1033,19 +1065,38 @@ def _start_scrcpy_v4l2() -> tuple[bool, str]:
                        "USB debugging")
     try:
         _run(["pkill", "-f", "scrcpy.*v4l2-sink"], timeout=5)
-        time.sleep(0.5)
+        time.sleep(0.6)
     except Exception:
         pass
+
+    log = _scrcpy_log()
     try:
-        subprocess.Popen(
+        fh = open(log, "wb")
+        proc = subprocess.Popen(
             [binary, f"--v4l2-sink={V4L2_DEVICE}", "--no-audio", "--no-window",
              "--stay-awake"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
         )
-        return True, f"tablet screen → {V4L2_DEVICE}"
     except Exception as e:  # noqa: BLE001
         return False, str(e)
+
+    time.sleep(4.0)
+
+    if proc.poll() is not None:
+        return False, "scrcpy stopped right after starting"
+    try:
+        text = log.read_text(errors="replace")
+    except OSError:
+        text = ""
+    if any(m in text for m in _SCRCPY_ERR_MARKERS):
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        return False, ("could not write to the virtual camera — something "
+                       "still has it open. Close the “Samsung Tablet” source "
+                       "in OBS and run Set Up Scenes again.")
+    return True, f"tablet screen → {V4L2_DEVICE}"
 
 
 def setup_scenes(progress_cb=None) -> list[StepResult]:
@@ -1079,17 +1130,18 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
     except Exception as e:  # noqa: BLE001
         steps.append(StepResult("Backup", False, str(e)))
 
-    prog("Preparing the virtual camera…", 22)
+    prog("Preparing the virtual camera…", 18)
     v_ok, v_msg = _ensure_v4l2()
     steps.append(StepResult("Virtual camera", v_ok, v_msg))
 
     if v_ok:
-        prog("Starting the tablet feed…", 42)
+        # Free the device in OBS first, otherwise scrcpy cannot write to it.
+        prog("Freeing the virtual camera…", 32)
+        _obs_py(_RELEASE_V4L2_SNIPPET)
+        time.sleep(0.5)
+        prog("Starting the tablet feed…", 44)
         s_ok, s_msg = _start_scrcpy_v4l2()
         steps.append(StepResult("Tablet feed (scrcpy)", s_ok, s_msg))
-        if s_ok:
-            prog("Waiting for the tablet picture…", 58)
-            time.sleep(4.0)
 
     prog("Creating scenes and sources in OBS…", 80)
     res, err = _obs_py(_setup_create_snippet())
