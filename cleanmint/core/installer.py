@@ -9,6 +9,7 @@ Having ONE polkit action for the helper means ONE password prompt covers
 all privileged operations (journal, snap, apt-get, systemctl).
 """
 
+import base64
 import hashlib
 import subprocess
 from pathlib import Path
@@ -36,42 +37,6 @@ def policy_signature() -> str:
     return h.hexdigest()[:16]
 
 
-def _write_as_root(src: Path, dest: Path) -> tuple[bool, str]:
-    """Write src to dest using pkexec tee. Returns (ok, error_msg)."""
-    try:
-        # Ensure parent directory exists
-        subprocess.run(
-            ["pkexec", "/bin/mkdir", "-p", str(dest.parent)],
-            capture_output=True, timeout=15,
-        )
-        r = subprocess.run(
-            ["pkexec", "/usr/bin/tee", str(dest)],
-            input=src.read_bytes(),
-            capture_output=True,
-            timeout=30,
-        )
-        if r.returncode == 0:
-            return True, ""
-        return False, r.stderr.decode(errors="replace").strip()
-    except FileNotFoundError:
-        return False, "pkexec not found."
-    except subprocess.TimeoutExpired:
-        return False, "pkexec timed out."
-    except Exception as e:
-        return False, str(e)
-
-
-def _chmod_helper() -> None:
-    """Make the helper executable."""
-    try:
-        subprocess.run(
-            ["pkexec", "/bin/chmod", "+x", str(HELPER_DEST)],
-            capture_output=True, timeout=15,
-        )
-    except Exception:
-        pass
-
-
 def is_policy_installed() -> bool:
     """Return True if both the policy and helper are installed and up to date."""
     try:
@@ -84,43 +49,61 @@ def is_policy_installed() -> bool:
         return False
 
 
+_INSTALL_SCRIPT = (
+    "set -e; "
+    "read h; read p; "
+    f'mkdir -p "{HELPER_DEST.parent}"; '
+    f'printf %s "$h" | base64 -d > "{HELPER_DEST}"; chmod 755 "{HELPER_DEST}"; '
+    f'mkdir -p "{POLICY_DEST.parent}"; '
+    f'printf %s "$p" | base64 -d > "{POLICY_DEST}"; chmod 644 "{POLICY_DEST}"'
+)
+
+
 def install_policy() -> tuple[bool, str]:
     """
-    Install the helper script and polkit policy using pkexec.
-    Both files are written with a single pkexec auth — auth_admin_keep
-    caches the credential so the second write doesn't prompt again.
-    Returns (success, message).
+    Install the helper script and polkit policy in a SINGLE pkexec call —
+    one password prompt writes both files. Returns (success, message).
     """
     if not POLICY_SRC.exists():
         return False, f"Policy source not found: {POLICY_SRC}"
     if not HELPER_SRC.exists():
         return False, f"Helper source not found: {HELPER_SRC}"
 
-    ok, err = _write_as_root(HELPER_SRC, HELPER_DEST)
-    if not ok:
-        return False, f"Could not install helper: {err}"
-    _chmod_helper()
+    payload = (base64.b64encode(HELPER_SRC.read_bytes()) + b"\n"
+               + base64.b64encode(POLICY_SRC.read_bytes()) + b"\n")
+    try:
+        r = subprocess.run(
+            ["pkexec", "/bin/sh", "-c", _INSTALL_SCRIPT],
+            input=payload, capture_output=True, timeout=120,
+        )
+    except FileNotFoundError:
+        return False, "pkexec not found."
+    except subprocess.TimeoutExpired:
+        return False, "pkexec timed out."
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
 
-    ok, err = _write_as_root(POLICY_SRC, POLICY_DEST)
-    if not ok:
-        return False, f"Helper installed but policy failed: {err}"
+    if r.returncode == 0:
+        return True, "CleanMint helper and policy installed successfully."
 
-    return True, "CleanMint helper and policy installed successfully."
+    err = r.stderr.decode(errors="replace").strip()
+    low = err.lower()
+    if "dismissed" in low or "not authorized" in low or r.returncode == 126:
+        return False, "Password prompt was cancelled."
+    return False, err or f"pkexec exited {r.returncode}"
 
 
 def uninstall_policy() -> tuple[bool, str]:
-    """Remove both the helper and policy file (requires root)."""
-    errors = []
-    for path in (HELPER_DEST, POLICY_DEST):
-        try:
-            r = subprocess.run(
-                ["pkexec", "/usr/bin/rm", "-f", str(path)],
-                capture_output=True, timeout=30,
-            )
-            if r.returncode != 0:
-                errors.append(r.stderr.decode(errors="replace").strip())
-        except Exception as e:
-            errors.append(str(e))
-    if errors:
-        return False, "; ".join(errors)
-    return True, "CleanMint helper and policy removed."
+    """Remove the helper and policy file in one pkexec call (requires root)."""
+    try:
+        r = subprocess.run(
+            ["pkexec", "/bin/sh", "-c",
+             f'rm -f "{HELPER_DEST}" "{POLICY_DEST}"'],
+            capture_output=True, timeout=60,
+        )
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
+    if r.returncode == 0:
+        return True, "CleanMint helper and policy removed."
+    return False, (r.stderr.decode(errors="replace").strip()
+                   or f"pkexec exited {r.returncode}")
