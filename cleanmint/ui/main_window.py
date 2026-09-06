@@ -14,7 +14,7 @@ from PyQt6.QtGui import QFont, QIcon
 
 from ui.theme import Theme
 from config.settings import settings
-from core.installer import is_policy_installed, install_policy
+from core.installer import is_policy_installed, install_policy, policy_signature
 
 
 NAV_ITEMS = [
@@ -237,15 +237,26 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(page)
 
     def _check_polkit_setup(self):
-        """On first run (or after an update), offer to install/update the polkit policy."""
+        """On first run (or after an update), offer to install/update the polkit policy.
+
+        Asked at most once per version of the policy/helper assets: if the user
+        skips it, or the install fails, that same version is not offered again
+        on later launches — only a newer version of the assets re-triggers it.
+        """
         if is_policy_installed():
+            settings.set("polkit_prompt_handled_for", "")  # clean slate for next update
             return
 
         from pathlib import Path
         dest = Path("/usr/share/polkit-1/actions/org.cleanmint.policy")
         is_update = dest.exists()  # file exists but content differs → update
 
-        # Only skip if user explicitly declined AND this isn't a required update
+        sig = policy_signature()
+        # Already offered this exact version and the user dismissed it (or the
+        # install failed) — don't nag again until the assets change.
+        if settings.get("polkit_prompt_handled_for", "") == sig:
+            return
+        # Back-compat with the older first-run-only flag.
         if not is_update and settings.get("polkit_setup_declined", False):
             return
 
@@ -280,6 +291,7 @@ class MainWindow(QMainWindow):
             result_msg = QMessageBox(self)
             result_msg.setWindowTitle("Setup Result")
             if ok:
+                settings.set("polkit_prompt_handled_for", "")
                 result_msg.setIcon(QMessageBox.Icon.Information)
                 result_msg.setText(
                     "Policy installed successfully.\n\n"
@@ -287,15 +299,24 @@ class MainWindow(QMainWindow):
                     "with a single password prompt."
                 )
             else:
+                # Install failed (or was cancelled at the password prompt).
+                # Remember this version so we don't nag on every launch; the
+                # user can still retry from Settings.
+                settings.set("polkit_prompt_handled_for", policy_signature())
                 result_msg.setIcon(QMessageBox.Icon.Warning)
                 result_msg.setText(
                     f"Could not install policy automatically.\n\n{detail}\n\n"
-                    "You can install it manually by running:\n\n"
-                    "  sudo cp ~/.local/share/cleanmint/org.cleanmint.policy \\\n"
-                    "    /usr/share/polkit-1/actions/"
+                    "CleanMint will keep working — you just may be asked for "
+                    "your password more than once for some actions.\n\n"
+                    "To finish setup manually, run:\n\n"
+                    "  sudo cp cleanmint/assets/org.cleanmint.policy \\\n"
+                    "    /usr/share/polkit-1/actions/\n"
+                    "  sudo install -m755 cleanmint/assets/cleanmint-helper \\\n"
+                    "    /usr/local/lib/cleanmint/cleanmint-helper"
                 )
             result_msg.exec()
         else:
+            settings.set("polkit_prompt_handled_for", policy_signature())
             if not is_update:
                 settings.set("polkit_setup_declined", True)
 

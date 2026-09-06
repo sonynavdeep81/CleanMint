@@ -381,3 +381,10 @@ Cleanmint/
 - CORRECT: `_PROTECTED_SNAPS` in `cleaner.py` lists snaps that are NEVER removed even if disabled:
   `mesa-2404`, `mesa-2204`, `core`/`core18`/`core20`/`core22`/`core24`, all `gnome-*` platform snaps,
   `gtk-common-themes`, `snapd`. Protected snaps log as `[SNAP PROTECTED]` and are skipped silently.
+
+### 22. Polkit setup prompt must not nag on every launch
+- WRONG: the "policy update available" branch ignored the declined flag, so a failing or
+  cancelled install re-prompted on every single launch.
+- CORRECT: `_check_polkit_setup` in `main_window.py` stores `policy_signature()` (hash of the
+  policy + helper assets) in `polkit_prompt_handled_for` whenever the user skips OR the install
+  fails. It re-asks only when the assets actually change to a new signature. Success clears it.
