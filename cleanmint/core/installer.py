@@ -9,6 +9,7 @@ Having ONE polkit action for the helper means ONE password prompt covers
 all privileged operations (journal, snap, apt-get, systemctl).
 """
 
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,22 @@ POLICY_SRC    = ASSETS / "org.cleanmint.policy"
 HELPER_SRC    = ASSETS / "cleanmint-helper"
 POLICY_DEST   = Path("/usr/share/polkit-1/actions/org.cleanmint.policy")
 HELPER_DEST   = Path("/usr/local/lib/cleanmint/cleanmint-helper")
+
+
+def policy_signature() -> str:
+    """Short hash of the current policy + helper source assets.
+
+    Used to remember which version of the prompt a user has already
+    answered, so a declined or failing install is not re-offered on every
+    launch — only once per new version of the assets.
+    """
+    h = hashlib.sha256()
+    for src in (POLICY_SRC, HELPER_SRC):
+        try:
+            h.update(src.read_bytes())
+        except OSError:
+            h.update(b"<missing>")
+    return h.hexdigest()[:16]
 
 
 def _write_as_root(src: Path, dest: Path) -> tuple[bool, str]:
