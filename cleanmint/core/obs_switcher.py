@@ -533,16 +533,21 @@ def check_status() -> list[Check]:
         else "not detected (USB + debugging)",
         fixable=False, manual_steps=_STEPS_TABLET,
     ))
-    feed_ok = v4l2_ready() and scrcpy_v4l2_running()
+    svc = feed_service_active()
+    feed_ok = v4l2_ready() and svc
+    if feed_ok and _tablet_connected():
+        feed_detail = "streaming (auto-restarts if it drops)"
+    elif feed_ok:
+        feed_detail = "feed service on — waiting for the tablet"
+    elif v4l2_ready():
+        feed_detail = "feed service not running"
+    else:
+        feed_detail = "not set up"
     checks.append(Check(
         "tablet_feed", "Tablet live feed",
-        feed_ok,
-        "streaming to OBS" if feed_ok
-        else ("virtual camera loaded, feed stopped" if v4l2_ready()
-              else "not set up"),
-        fixable=False,
-        manual_steps='Click "Set Up Scenes" to load the virtual camera and '
-                     "start streaming the tablet into OBS.",
+        feed_ok or (svc and not _tablet_connected()),
+        feed_detail, fixable=False,
+        manual_steps='Click "Set Up Scenes" to (re)start the tablet feed.',
     ))
     checks.append(Check(
         "protection", "File protection", True,
@@ -1020,95 +1025,94 @@ def _ensure_v4l2() -> tuple[bool, str]:
     return False, f"{V4L2_DEVICE} did not appear after loading v4l2loopback"
 
 
-def scrcpy_v4l2_running() -> bool:
+FEED_SERVICE = "cleanmint-obs-tablet-feed.service"
+
+
+def _feed_unit_path() -> Path:
+    return (_paths().home / ".config" / "systemd" / "user" / FEED_SERVICE)
+
+
+def _feed_unit_text(binary: str) -> str:
+    return (
+        "[Unit]\n"
+        "Description=CleanMint OBS tablet feed (scrcpy to v4l2loopback)\n"
+        "After=graphical-session.target\n"
+        "StartLimitIntervalSec=0\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"ExecStart={binary} --v4l2-sink={V4L2_DEVICE} --no-audio "
+        "--no-window --stay-awake\n"
+        "Restart=always\n"
+        "RestartSec=8\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
+def _systemctl_user(*args: str) -> subprocess.CompletedProcess:
+    return _run(["systemctl", "--user", *args], timeout=20)
+
+
+def feed_service_active() -> bool:
     try:
-        r = _run(["pgrep", "-af", "scrcpy"], timeout=5)
-        return r.returncode == 0 and "v4l2-sink" in r.stdout
+        return _systemctl_user("is-active", FEED_SERVICE).stdout.strip() == "active"
     except Exception:
         return False
 
 
-def _scrcpy_log() -> Path:
-    d = _paths().home / ".cache" / "cleanmint"
-    d.mkdir(parents=True, exist_ok=True)
-    return d / "obs-scrcpy.log"
+def scrcpy_v4l2_running() -> bool:
+    """True if the tablet feed is up (systemd service or a bare scrcpy)."""
+    if feed_service_active():
+        return True
+    try:
+        r = _run(["pgrep", "-f", "v4l2-sink="], timeout=5)
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
-# scrcpy can only write to the v4l2 device if nothing else has it open. OBS
-# holds it via the "Samsung Tablet" input, so that input must be removed first.
-_RELEASE_V4L2_SNIPPET = (
-    f"DEV = {V4L2_DEVICE!r}\n"
-    "released = []\n"
-    "for i in c.get_input_list().inputs:\n"
-    "    if i['inputKind'] != 'v4l2_input':\n"
-    "        continue\n"
-    "    try:\n"
-    "        s = c.get_input_settings(i['inputName']).input_settings\n"
-    "    except Exception:\n"
-    "        s = {}\n"
-    "    if s.get('device_id') == DEV:\n"
-    "        try:\n"
-    "            c.remove_input(i['inputName']); released.append(i['inputName'])\n"
-    "        except Exception:\n"
-    "            pass\n"
-    "print(json.dumps({'released': released}))\n"
-)
-
-_SCRCPY_ERR_MARKERS = (
-    "Failed to write header", "Could not send frame to v4l2 sink",
-    "Could not send packet to v4l2 sink", "ioctl(VIDIOC",
-)
+def restart_feed_service() -> tuple[bool, str]:
+    try:
+        r = _systemctl_user("restart", FEED_SERVICE)
+        return r.returncode == 0, (r.stderr.strip() or "")
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
 
 
-def _start_scrcpy_v4l2() -> tuple[bool, str]:
-    """(Re)start scrcpy feeding the tablet screen into the v4l2 device.
+def install_feed_service() -> tuple[bool, str]:
+    """Install + enable the user service that keeps the tablet feed running.
 
-    Verifies the feed actually connected — a scrcpy that starts but cannot
-    write to the device (because something still holds it) is reported as a
-    failure, not a success.
+    The service auto-starts on login and restarts scrcpy within ~8s if it
+    exits (tablet unplugged/replugged, screen lock, crash).
     """
-    import time
     binary = _scrcpy_binary()
     if not binary:
         return False, ("scrcpy not found — download the official static "
                        "release and extract it into your home folder")
-    if not _tablet_connected():
-        return False, ("no tablet detected — connect it by USB and authorise "
-                       "USB debugging")
+    unit = _feed_unit_path()
     try:
-        _run(["pkill", "-f", "scrcpy.*v4l2-sink"], timeout=5)
-        time.sleep(0.6)
-    except Exception:
-        pass
-
-    log = _scrcpy_log()
-    try:
-        fh = open(log, "wb")
-        proc = subprocess.Popen(
-            [binary, f"--v4l2-sink={V4L2_DEVICE}", "--no-audio", "--no-window",
-             "--stay-awake"],
-            stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
-        )
+        unit.parent.mkdir(parents=True, exist_ok=True)
+        desired = _feed_unit_text(binary)
+        if not unit.exists() or unit.read_text() != desired:
+            unit.write_text(desired)
+            _systemctl_user("daemon-reload")
+        _systemctl_user("enable", FEED_SERVICE)
+        _systemctl_user("restart", FEED_SERVICE)
     except Exception as e:  # noqa: BLE001
         return False, str(e)
 
-    time.sleep(4.0)
-
-    if proc.poll() is not None:
-        return False, "scrcpy stopped right after starting"
-    try:
-        text = log.read_text(errors="replace")
-    except OSError:
-        text = ""
-    if any(m in text for m in _SCRCPY_ERR_MARKERS):
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-        return False, ("could not write to the virtual camera — something "
-                       "still has it open. Close the “Samsung Tablet” source "
-                       "in OBS and run Set Up Scenes again.")
-    return True, f"tablet screen → {V4L2_DEVICE}"
+    import time
+    for _ in range(6):
+        time.sleep(1.0)
+        if feed_service_active():
+            if not _tablet_connected():
+                return True, ("service running — connect the tablet by USB "
+                              "and it will appear within a few seconds")
+            return True, "streaming (auto-restarts if it drops)"
+    return False, ("the feed service did not come up — check "
+                   f"'systemctl --user status {FEED_SERVICE}'")
 
 
 def setup_scenes(progress_cb=None) -> list[StepResult]:
@@ -1119,8 +1123,9 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
 
     - Laptop: PipeWire screen capture (needs one portal pick the first time;
       its restore token then persists).
-    - Tablet: scrcpy → v4l2loopback → a plain Video Capture Device source.
-      Fully automatic, no portal, survives restarts.
+    - Tablet: a systemd user service runs scrcpy → v4l2loopback → a plain
+      Video Capture Device source. Auto-starts on login, auto-restarts if the
+      feed drops. No portal.
     """
     import time
 
@@ -1147,13 +1152,9 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
     steps.append(StepResult("Virtual camera", v_ok, v_msg))
 
     if v_ok:
-        # Free the device in OBS first, otherwise scrcpy cannot write to it.
-        prog("Freeing the virtual camera…", 32)
-        _obs_py(_RELEASE_V4L2_SNIPPET)
-        time.sleep(0.5)
-        prog("Starting the tablet feed…", 44)
-        s_ok, s_msg = _start_scrcpy_v4l2()
-        steps.append(StepResult("Tablet feed (scrcpy)", s_ok, s_msg))
+        prog("Setting up the tablet feed…", 40)
+        s_ok, s_msg = install_feed_service()
+        steps.append(StepResult("Tablet feed", s_ok, s_msg))
 
     prog("Creating scenes and sources in OBS…", 80)
     res, err = _obs_py(_setup_create_snippet())

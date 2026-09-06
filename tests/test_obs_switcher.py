@@ -356,7 +356,7 @@ ob.websocket_reachable = lambda *a, **k: True
 ob.backup = lambda *a, **k: None
 _feed = []
 ob._ensure_v4l2 = lambda: (True, "virtual camera ready")
-ob._start_scrcpy_v4l2 = lambda: (_feed.append(1), (True, "feeding"))[1]
+ob.install_feed_service = lambda: (_feed.append(1), (True, "streaming"))[1]
 
 # fresh: create scenes + laptop pipewire source + tablet v4l2 source
 ob._obs_py = lambda body, timeout=60: (
@@ -367,7 +367,7 @@ ob._obs_py = lambda body, timeout=60: (
 s1 = ob.setup_scenes()
 check("fresh: v4l2 prepared", any(s.label == "Virtual camera" and s.ok
                                   for s in s1))
-check("fresh: tablet feed started once", _feed == [1])
+check("fresh: feed service installed once", _feed == [1])
 check("fresh: two scenes created", sum("Scene" in s.label for s in s1) == 2)
 check("fresh: two sources created", sum("Source " in s.label for s in s1) == 2)
 check("fresh: fit-to-screen step shown",
@@ -376,7 +376,7 @@ check("fresh: laptop portal note shown",
       any("Finish the Laptop scene" in s.label for s in s1))
 check("fresh: no failures", all(s.ok for s in s1))
 
-# already good: v4l2 source present -> reported existing, still (re)starts feed
+# already good: v4l2 source present -> reported existing, feed service re-ensured
 _feed.clear()
 ob._obs_py = lambda body, timeout=60: (
     {"created_scenes": [], "created_sources": [], "replaced": [],
@@ -385,8 +385,7 @@ ob._obs_py = lambda body, timeout=60: (
 s2 = ob.setup_scenes()
 check("existing: reports 'already set up'",
       sum("already set up" in s.label.lower() for s in s2) == 2)
-check("existing: feed still (re)started (survives reboot/restart)",
-      _feed == [1])
+check("existing: feed service re-ensured (survives reboot)", _feed == [1])
 check("existing: no failures", all(s.ok for s in s2))
 
 # black pipewire tablet source -> replaced with v4l2
@@ -407,21 +406,21 @@ ob._obs_py = lambda body, timeout=60: (
 s4 = ob.setup_scenes()
 check("v4l2 fail: reported as a failed step",
       any(s.label == "Virtual camera" and not s.ok for s in s4))
-check("v4l2 fail: feed NOT started", _feed == [])
+check("v4l2 fail: feed service NOT installed", _feed == [])
 check("v4l2 fail: scene creation still ran",
       any("Scene" in s.label for s in s4))
 
-# feed can't write to the device -> surfaced as a failed step, scenes still made
+# feed service fails to come up -> surfaced as a failed step, scenes still made
 _feed.clear()
 ob._ensure_v4l2 = lambda: (True, "ready")
-ob._start_scrcpy_v4l2 = lambda: (False, "could not write to the virtual camera")
+ob.install_feed_service = lambda: (False, "feed service did not come up")
 ob._obs_py = lambda body, timeout=60: (
     {"created_scenes": ["Tablet"], "created_sources": ["Tablet / Samsung Tablet"],
      "replaced": [], "existing": [], "errors": []}, "")
 s5 = ob.setup_scenes()
-check("feed-write fail: reported as failed step",
-      any(s.label == "Tablet feed (scrcpy)" and not s.ok for s in s5))
-check("feed-write fail: scene + source still created",
+check("feed fail: reported as failed step",
+      any(s.label == "Tablet feed" and not s.ok for s in s5))
+check("feed fail: scene + source still created",
       sum(("Scene" in s.label or "Source" in s.label) for s in s5) >= 2)
 
 
