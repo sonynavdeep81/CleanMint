@@ -1,20 +1,22 @@
 # STATE — resume pointer
 
-**Focus:** New feature "OBS Switcher" — page to build/protect/backup/test the
-laptop⇄Samsung-tablet OBS scene-switching setup (from obs.md).
+**Focus:** OBS Switcher feature — code complete on branch `feat/obs-switcher`.
 
-**Last decision:** Spec + implementation plan both approved & committed.
-Spec: `docs/superpowers/specs/2026-09-06-obs-switcher-design.md`
-Plan: `docs/superpowers/plans/2026-09-06-obs-switcher.md` (12 TDD tasks)
-Choices locked: chattr +i lock on stable files; automation-layer-only build
-(no package installs); auto-read WS password from OBS config.json; verify scenes
-only (never edit them).
+**Last decision:** Implemented per plan
+`docs/superpowers/plans/2026-09-06-obs-switcher.md` (Tasks 1–12).
+Engine `core/obs_switcher.py`, page `ui/obs_switcher_page.py`, helper
+`obs-lock`/`obs-unlock`, sidebar entry. `tests/test_obs_switcher.py` 85/85,
+`test_ui_imports.py` 15/15. Real-machine check_status all green (tablet=info,
+backup created). Offscreen page smoke passed.
 
-**Next action:** Execute the plan task-by-task (subagent-driven or inline).
-Not started yet — Task 1 first.
+**Pre-existing failures (NOT from this work, present on main):**
+`test_backend_phase5.py` "Source field valid"; `test_integration.py`
+"Would delete" wording + a /tmp race from a concurrent process.
 
-**Files to create:** core/obs_switcher.py, ui/obs_switcher_page.py,
-tests/test_obs_switcher.py; edit assets/cleanmint-helper (obs-lock/obs-unlock),
-ui/main_window.py (nav entry), CLAUDE.md.
+**Next action:** User to run the interactive smoke test (Task 12 step 4):
+launch app → OBS Switcher page; with OBS open click "Test Switching";
+click "Protect Files" (pkexec) then confirm `rm ~/.local/bin/obs-scene` is
+refused; "Unprotect Files"; "Check & Restore". Then merge (finishing-a-branch).
+NOTE: helper changed → app will prompt to update the polkit helper on launch.
 
 **Hints:** —
