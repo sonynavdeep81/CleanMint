@@ -46,7 +46,14 @@ prompt now since v4l2 already prepared).
 (empty-canvas) borders → Set Up Scenes now applies OBS_BOUNDS_SCALE_INNER
 sized to the canvas to every source in both scenes ("Fit to screen" step).
 
+**Fixed (merged 1b7e3fb):** deleting the Tablet SCENE left OBS's "Samsung Tablet"
+v4l2 input holding /dev/video42 → scrcpy couldn't write (VIDIOC_G_FMT) → black
+even though status said "streaming". Set Up Scenes now: remove v4l2 input →
+start scrcpy on the free device → verify the feed connected (scans scrcpy log
+for write errors) → recreate the OBS source. Verified: live Samsung Notes in OBS.
+`test_obs_switcher.py` 114 checks.
+
 **Next action:** feature complete + pushed. User clicks "Set Up Scenes" to
-(re)start the feed after reboots. `test_obs_switcher.py` 112 checks.
+(re)start the feed after reboots or after deleting a scene.
 
 **Hints:** —
