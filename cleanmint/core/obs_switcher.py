@@ -217,3 +217,20 @@ def read_obs_password() -> str | None:
         return pw if isinstance(pw, str) and pw else None
     except Exception:
         return None
+
+
+def set_password(pw: str) -> None:
+    """Write the WebSocket password to ~/.config/obs-hotkeys/password (600)."""
+    p = _paths()
+    p.pw_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(p.pw_dir, 0o700)
+    p.pw_file.write_text(pw.strip())
+    os.chmod(p.pw_file, 0o600)
+
+
+def _write_script() -> None:
+    """(Re)write ~/.local/bin/obs-scene from the template, mode 755."""
+    p = _paths()
+    p.script.parent.mkdir(parents=True, exist_ok=True)
+    p.script.write_text(render_script(str(p.venv_py), str(p.pw_file)))
+    os.chmod(p.script, 0o755)

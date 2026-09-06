@@ -120,5 +120,26 @@ check("websocket_reachable False when nothing listens",
 check("obs_running returns bool", isinstance(ob.obs_running(), bool))
 
 
+print("\n=== OBS Switcher — set_password / _write_script ===\n")
+
+home = new_home()
+p = ob._paths()
+
+ob.set_password("hunter2")
+check("password file created", p.pw_file.is_file())
+check("password file mode 600",
+      stat.S_IMODE(p.pw_file.stat().st_mode) == 0o600)
+check("password dir mode 700",
+      stat.S_IMODE(p.pw_dir.stat().st_mode) == 0o700)
+check("password content", p.pw_file.read_text() == "hunter2")
+
+ob._write_script()
+check("script created", p.script.is_file())
+check("script executable", os.access(p.script, os.X_OK))
+check("script shebang points at venv py",
+      p.script.read_text().splitlines()[0] == f"#!{p.venv_py}")
+check("script embeds pw file path", f'"{p.pw_file}"' in p.script.read_text())
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)
