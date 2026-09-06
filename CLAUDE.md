@@ -60,19 +60,29 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
     WebSocket API. Backs up the OBS config, leaves working sources untouched,
     needs OBS running. Opt-in, behind a confirm — the only action that writes to
     the scene collection.
-    - Laptop = `pipewire-screen-capture-source` (one portal pick the first time;
-      the restore token then persists)
-    - Tablet = `scrcpy --v4l2-sink=/dev/video42` → a plain `v4l2_input` source.
-      Fully automatic, NO Wayland portal, survives OBS/scrcpy restarts. Helper op
-      `obs-v4l2` loads `v4l2loopback` (video_nr=42, label "CleanMint Tablet") and
-      makes it boot-persistent (`/etc/modules-load.d`, `/etc/modprobe.d`,
-      `/etc/udev/rules.d/99-cleanmint-v4l2.rules`).
-    - `tablet_feed` status check: green when `/dev/video42` exists AND
-      `scrcpy … v4l2-sink` is running; "Set Up Scenes" (re)starts the feed.
+    - Laptop = `pipewire-screen-capture-source`. Needs ONE Wayland portal pick
+      (no API bypass; stale RestoreTokens do NOT reconnect). Set Up Scenes
+      opens the source's Properties dialog via WebSocket to trigger the picker
+      and adds a "Finish the Laptop scene" step. Token persists after a real pick.
+    - Tablet = `v4l2_input` source reading `/dev/video42`, fed by
+      `scrcpy --v4l2-sink`. NO portal. Two pieces:
+      1. helper op `obs-v4l2` loads `v4l2loopback` (video_nr=42, label
+         "CleanMint Tablet"), boot-persistent via `/etc/modules-load.d`,
+         `/etc/modprobe.d`, `/etc/udev/rules.d/99-cleanmint-v4l2.rules`
+      2. systemd USER service `cleanmint-obs-tablet-feed.service`
+         (`~/.config/systemd/user/`) runs scrcpy; `Restart=always RestartSec=8`,
+         `StartLimitIntervalSec=0`, `enable`d → auto-starts on login, auto-restarts
+         if the tablet unplugs/relocks/crashes. `install_feed_service()` writes +
+         enables it; `feed_service_active()` / `restart_feed_service()`.
+    - `tablet_feed` status check: green when `/dev/video42` exists AND the feed
+      service is active; "Set Up Scenes" (re)installs/restarts it.
+    - Also applies `OBS_BOUNDS_SCALE_INNER` to every source (fit to canvas).
   - "Test Switching": runs the real `obs-scene Laptop`/`Tablet` against a live
     OBS via WebSocket, confirms the program scene changed, restores the original
   - Engine `core/obs_switcher.py` (UI-free), page `ui/obs_switcher_page.py`
   - Never edits EXISTING scenes; only "Set Up Scenes" adds missing ones
+  - NOTE: `install.sh --remove` does not stop the feed service —
+    `systemctl --user disable --now cleanmint-obs-tablet-feed.service` to remove it
 - **Settings page**: Dark/light mode, persistent JSON settings
 - **Logs page**: Shows CleanMint session logs with color-coded highlighting
   - `[DELETED]` / `[SNAP REMOVED]` lines highlighted red — shows exactly what was removed
