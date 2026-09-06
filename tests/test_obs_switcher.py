@@ -363,7 +363,7 @@ ob._obs_py = lambda body, timeout=60: (
     {"created_scenes": ["Laptop", "Tablet"],
      "created_sources": ["Laptop / HP Laptop", "Tablet / Samsung Tablet"],
      "existing": [], "replaced": [], "fitted": ["Laptop", "Tablet"],
-     "errors": []}, "")
+     "laptop_needs_pick": True, "errors": []}, "")
 s1 = ob.setup_scenes()
 check("fresh: v4l2 prepared", any(s.label == "Virtual camera" and s.ok
                                   for s in s1))

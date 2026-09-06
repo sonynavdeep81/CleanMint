@@ -912,7 +912,7 @@ def _setup_create_snippet() -> str:
     dev = V4L2_DEVICE
     return (
         "res = {'created_scenes': [], 'created_sources': [], 'existing': [], "
-        "'replaced': [], 'errors': []}\n"
+        "'replaced': [], 'errors': [], 'laptop_needs_pick': False}\n"
         "scenes = [s['sceneName'] for s in c.get_scene_list().scenes]\n"
         "for sc in ('Laptop', 'Tablet'):\n"
         "    if sc not in scenes:\n"
@@ -928,16 +928,28 @@ def _setup_create_snippet() -> str:
         "        c.create_input('Laptop', 'HP Laptop', "
         "'pipewire-screen-capture-source', {}, True)\n"
         "        res['created_sources'].append('Laptop / HP Laptop')\n"
+        "    try:\n"
+        "        tok = c.get_input_settings('HP Laptop')"
+        ".input_settings.get('RestoreToken', '')\n"
+        "        if not tok:\n"
+        "            res['laptop_needs_pick'] = True\n"
+        "            c.open_input_properties_dialog('HP Laptop')\n"
+        "    except Exception:\n"
+        "        pass\n"
         "except Exception as e:\n"
         "    res['errors'].append('Laptop source: %s' % e)\n"
         "try:\n"
         "    for i in c.get_scene_item_list('Tablet').scene_items:\n"
-        "        try:\n"
-        "            c.remove_input(i['sourceName'])\n"
-        "            if i['sourceName'] != 'Samsung Tablet':\n"
+        "        if i['sourceName'] != 'Samsung Tablet':\n"
+        "            try:\n"
+        "                c.remove_input(i['sourceName'])\n"
         "                res['replaced'].append(i['sourceName'])\n"
-        "        except Exception:\n"
-        "            pass\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "    try:\n"
+        "        c.remove_input('Samsung Tablet')\n"  # clear any orphan
+        "    except Exception:\n"
+        "        pass\n"
         f"    c.create_input('Tablet', 'Samsung Tablet', 'v4l2_input', "
         f"{{'device_id': '{dev}'}}, True)\n"
         "    res['created_sources'].append('Tablet / Samsung Tablet')\n"
@@ -1165,11 +1177,12 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
     for e in res.get("errors", []):
         steps.append(StepResult("OBS", False, e))
 
-    if any("Laptop / HP Laptop" in s for s in res.get("created_sources", [])):
+    if res.get("laptop_needs_pick"):
         steps.append(StepResult(
             "Finish the Laptop scene", True,
-            "OBS is showing a screen-share dialog for “HP Laptop” — pick your "
-            "laptop display once (it is remembered after that)."))
+            "OBS just opened the “HP Laptop” Properties window — click "
+            "“Select” / your monitor in the screen-share dialog, then Close. "
+            "OBS remembers it after that; the tablet needs nothing."))
 
     prog("Done.", 100)
     return steps
