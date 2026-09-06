@@ -11,9 +11,15 @@
 `test_backend_phase5.py` "Source field valid"; `test_integration.py`
 "Would delete" wording (+ a /tmp race from a concurrent process).
 
-**Next action:** User runs the interactive smoke test — launch app (accept the
-polkit helper update prompt), OBS Switcher page: with OBS open click
-"Test Switching"; "Protect Files" then confirm `rm ~/.local/bin/obs-scene` is
-refused; "Unprotect Files"; "Check & Restore". Then `git push` if all good.
+**Also fixed (merge c8e4c95):** polkit setup prompt nagged on every launch when
+an update install failed/was cancelled — `_check_polkit_setup` now records
+`policy_signature()` on skip/fail and re-asks only when the assets change.
+On this machine `is_policy_installed()` is already True + helper current
+(verified lock/unlock work end-to-end) → no prompt should appear.
+
+**Next action:** User runs the interactive smoke test — OBS Switcher page: with
+OBS open click "Test Switching"; "Protect Files" then confirm
+`rm ~/.local/bin/obs-scene` is refused; "Unprotect Files"; "Check & Restore".
+Then `git push` (main is ahead of origin/main).
 
 **Hints:** —
