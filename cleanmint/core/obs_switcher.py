@@ -867,6 +867,181 @@ def _query_scene() -> str | None:
         return None
 
 
+def _obs_py(body: str, timeout: int = 60) -> tuple[dict | None, str]:
+    """Run `body` in the obs-hotkey venv with a connected ReqClient `c`.
+
+    `body` must end by printing one line of JSON. Returns (parsed, "") or
+    (None, error).
+    """
+    p = _paths()
+    preamble = (
+        "import json, obsws_python as obs\n"
+        f"c = obs.ReqClient(host='localhost', port=4455, "
+        f"password=open({str(p.pw_file)!r}).read().strip(), timeout=6)\n"
+    )
+    try:
+        r = _run([str(p.venv_py), "-c", preamble + body], timeout=timeout)
+    except Exception as e:  # noqa: BLE001
+        return None, str(e)
+    if r.returncode != 0:
+        return None, (r.stderr.strip().splitlines()[-1]
+                      if r.stderr.strip() else "OBS call failed")
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1]), ""
+    except Exception as e:  # noqa: BLE001
+        return None, f"unexpected response ({e})"
+
+
+_SETUP_QUERY = (
+    "scenes = [s['sceneName'] for s in c.get_scene_list().scenes]\n"
+    "out = {'scenes': scenes, 'src': {}}\n"
+    "for sc in ('Laptop', 'Tablet'):\n"
+    "    if sc not in scenes:\n"
+    "        out['src'][sc] = None\n"
+    "        continue\n"
+    "    try:\n"
+    "        out['src'][sc] = [i['sourceName'] "
+    "for i in c.get_scene_item_list(sc).scene_items]\n"
+    "    except Exception:\n"
+    "        out['src'][sc] = []\n"
+    "print(json.dumps(out))\n"
+)
+
+_SETUP_CREATE = (
+    "want = {'Laptop': 'HP Laptop', 'Tablet': 'Samsung Tablet'}\n"
+    "res = {'created_scenes': [], 'created_sources': [], "
+    "'existing': [], 'errors': []}\n"
+    "scenes = [s['sceneName'] for s in c.get_scene_list().scenes]\n"
+    "for sc in ('Laptop', 'Tablet'):\n"
+    "    if sc not in scenes:\n"
+    "        try:\n"
+    "            c.create_scene(sc)\n"
+    "            res['created_scenes'].append(sc)\n"
+    "        except Exception as e:\n"
+    "            res['errors'].append('scene %s: %s' % (sc, e))\n"
+    "for sc, src in want.items():\n"
+    "    try:\n"
+    "        items = c.get_scene_item_list(sc).scene_items\n"
+    "    except Exception as e:\n"
+    "        res['errors'].append('list %s: %s' % (sc, e))\n"
+    "        continue\n"
+    "    if items:\n"
+    "        res['existing'].append('%s: %s' % (sc, items[0]['sourceName']))\n"
+    "        continue\n"
+    "    try:\n"
+    "        c.create_input(sc, src, 'pipewire-screen-capture-source', {}, True)\n"
+    "        res['created_sources'].append('%s / %s' % (sc, src))\n"
+    "    except Exception as e:\n"
+    "        res['errors'].append('source %s/%s: %s' % (sc, src, e))\n"
+    "print(json.dumps(res))\n"
+)
+
+
+def _scrcpy_binary() -> str | None:
+    w = shutil.which("scrcpy")
+    if w:
+        return w
+    for d in sorted(_paths().home.glob("scrcpy-linux-x86_64*"), reverse=True):
+        cand = d / "scrcpy"
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
+
+
+def scrcpy_running() -> bool:
+    try:
+        return _run(["pgrep", "-x", "scrcpy"], timeout=5).returncode == 0
+    except Exception:
+        return False
+
+
+def _launch_scrcpy() -> tuple[bool, str]:
+    binary = _scrcpy_binary()
+    if not binary:
+        return False, ("scrcpy not found — download the official static "
+                       "release and extract it into your home folder")
+    if not _tablet_connected():
+        return False, ("no tablet detected — connect it by USB and authorise "
+                       "USB debugging")
+    try:
+        subprocess.Popen(
+            [binary, "--window-title=Samsung Tablet"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return True, 'launched (window "Samsung Tablet")'
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
+
+
+def setup_scenes(progress_cb=None) -> list[StepResult]:
+    """Create the Laptop/Tablet scenes and their capture sources in OBS.
+
+    Needs OBS running with the WebSocket server enabled. Backs up the OBS
+    config first. The PipeWire capture sources still need one portal pick
+    each (choose the display / the scrcpy window) — OBS shows that dialog.
+    """
+    import time
+
+    def prog(msg, pct):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    if not websocket_reachable():
+        return [StepResult(
+            "Precondition", False,
+            "Start OBS first, with its WebSocket server enabled on port 4455.")]
+
+    steps: list[StepResult] = []
+
+    prog("Backing up OBS configuration…", 10)
+    try:
+        backup()
+        steps.append(StepResult("Backup", True, "OBS config backed up"))
+    except Exception as e:  # noqa: BLE001
+        steps.append(StepResult("Backup", False, str(e)))
+
+    prog("Reading current scenes…", 25)
+    state, err = _obs_py(_SETUP_QUERY)
+    if state is None:
+        steps.append(StepResult("Read OBS", False, err))
+        return steps
+
+    tablet_src = state.get("src", {}).get("Tablet")
+    if not tablet_src and not scrcpy_running():
+        prog("Starting scrcpy…", 40)
+        ok, msg = _launch_scrcpy()
+        steps.append(StepResult("Start scrcpy", ok, msg))
+        if ok:
+            prog("Waiting for the tablet window…", 55)
+            time.sleep(3.0)
+
+    prog("Creating scenes and sources…", 75)
+    res, err = _obs_py(_SETUP_CREATE)
+    if res is None:
+        steps.append(StepResult("Create scenes", False, err))
+        return steps
+
+    for s in res.get("created_scenes", []):
+        steps.append(StepResult(f"Scene “{s}”", True, "created"))
+    for s in res.get("created_sources", []):
+        steps.append(StepResult(f"Source {s}", True, "created"))
+    for s in res.get("existing", []):
+        steps.append(StepResult(f"Already set up — {s}", True, "left as-is"))
+    for e in res.get("errors", []):
+        steps.append(StepResult("OBS", False, e))
+
+    if res.get("created_sources"):
+        steps.append(StepResult(
+            "Finish in OBS", True,
+            "OBS is showing a screen-share dialog for each new source — "
+            "pick your laptop display for “HP Laptop”, and the "
+            "“Samsung Tablet” window for “Samsung Tablet”."))
+
+    prog("Done.", 100)
+    return steps
+
+
 def self_test(progress_cb=None) -> list[StepResult]:
     p = _paths()
 
