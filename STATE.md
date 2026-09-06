@@ -24,7 +24,14 @@ Protect/Unprotect work (rm refused while locked). check_status all green.
 `test_backend_phase5.py` "Source field valid"; `test_integration.py`
 "Would delete" wording (+ a /tmp race from a concurrent process).
 
-**Next action:** Nothing required. Optional: user runs Check & Restore;
-`git push` when ready.
+**Added (merged):** "Set Up Scenes" button — creates Laptop/Tablet scenes +
+`pipewire-screen-capture-source` sources via WebSocket API, launches scrcpy
+first, backs up config, leaves existing scenes untouched. Opt-in + confirm.
+Scope chosen by user: scenes + sources + auto-launch scrcpy. Verified
+idempotent against live OBS (everything present → "left as-is").
+`test_obs_switcher.py` now 104 checks.
+
+**Next action:** Nothing required. `git push` when ready
+(main ~16 commits ahead of origin/main).
 
 **Hints:** —
