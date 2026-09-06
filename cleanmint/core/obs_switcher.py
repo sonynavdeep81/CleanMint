@@ -812,3 +812,71 @@ def lock() -> tuple[bool, str]:
 
 def unlock() -> tuple[bool, str]:
     return _pkexec_helper("obs-unlock")
+
+
+# ── Self-test ─────────────────────────────────────────────────────────────
+
+_QUERY_SNIPPET = (
+    "import obsws_python as obs;"
+    "c=obs.ReqClient(host='localhost',port=4455,"
+    "password=open({pw!r}).read().strip(),timeout=3);"
+    "r=c.get_current_program_scene();"
+    "print(getattr(r,'current_program_scene_name',None) "
+    "or getattr(r,'scene_name',''))"
+)
+
+
+def _query_scene() -> str | None:
+    """Return OBS's current program scene name, via the obs-hotkey venv."""
+    p = _paths()
+    try:
+        r = _run([str(p.venv_py), "-c",
+                  _QUERY_SNIPPET.format(pw=str(p.pw_file))], timeout=10)
+        name = r.stdout.strip()
+        return name or None
+    except Exception:
+        return None
+
+
+def self_test(progress_cb=None) -> list[StepResult]:
+    p = _paths()
+
+    def _prog(msg, pct):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    if not (obs_running() and websocket_reachable()):
+        return [StepResult(
+            "Precondition", False,
+            "Start OBS first (WebSocket must be reachable on port 4455).")]
+
+    steps: list[StepResult] = []
+
+    _prog("Reading current scene…", 10)
+    original = _query_scene()
+    steps.append(StepResult("Connect to OBS", original is not None,
+                            f"current scene: {original or 'unknown'}"))
+
+    for pct, scene in ((40, "Laptop"), (70, "Tablet")):
+        _prog(f"Switching to {scene}…", pct)
+        try:
+            _run([str(p.script), scene], timeout=10)
+        except Exception as e:  # noqa: BLE001
+            steps.append(StepResult(f"Switch to {scene}", False, str(e)))
+            continue
+        now = _query_scene()
+        steps.append(StepResult(
+            f"Switch to {scene}", now == scene,
+            "ok" if now == scene else f"OBS is on '{now}', expected '{scene}'"))
+
+    if original:
+        _prog("Restoring original scene…", 95)
+        try:
+            _run([str(p.script), original], timeout=10)
+            steps.append(StepResult(f"Restore '{original}'",
+                                    _query_scene() == original, "ok"))
+        except Exception as e:  # noqa: BLE001
+            steps.append(StepResult(f"Restore '{original}'", False, str(e)))
+
+    _prog("Done.", 100)
+    return steps

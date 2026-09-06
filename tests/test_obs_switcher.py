@@ -294,5 +294,43 @@ check("_write_shortcuts wrote the custom-keybindings array",
       any(c[3] == "custom-keybindings" for c in sets))
 
 
+print("\n=== OBS Switcher — self_test ===\n")
+
+ob = importlib.reload(ob)
+home = new_home()
+p = ob._paths()
+p.script.parent.mkdir(parents=True)
+
+# fake obs-scene: writes the requested scene to a state file
+state = home / "scene_state.txt"
+state.write_text("Intro")
+p.script.write_text("#!/bin/sh\n" f'echo "$1" > "{state}"\n')
+os.chmod(p.script, 0o755)
+
+# _query_scene reads the state file; pretend OBS + websocket are up
+ob.obs_running = lambda: True
+ob.websocket_reachable = lambda timeout=1.0: True
+ob._query_scene = lambda: state.read_text().strip()
+
+steps = ob.self_test()
+labels = [s.label for s in steps]
+oks = {s.label: s.ok for s in steps}
+check("self_test switched to Laptop", any("Laptop" in l for l in labels))
+check("self_test Laptop step ok",
+      all(v for k, v in oks.items() if "Laptop" in k))
+check("self_test Tablet step ok",
+      all(v for k, v in oks.items() if "Tablet" in k))
+check("self_test restored original scene last",
+      state.read_text().strip() == "Intro")
+check("self_test all ok", all(s.ok for s in steps),
+      f"{[(s.label, s.ok, s.detail) for s in steps]}")
+
+# precondition failure
+ob.websocket_reachable = lambda timeout=1.0: False
+steps2 = ob.self_test()
+check("self_test one precondition failure when ws down",
+      len(steps2) == 1 and steps2[0].ok is False)
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)
