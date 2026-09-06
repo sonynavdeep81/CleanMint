@@ -24,8 +24,13 @@ permitted" when protection was ON (chattr +i). `build()` now returns
 User's files are currently LOCKED (they clicked Protect) — expected.
 Their status list is all-green; Build/Repair is only for a broken setup.
 
-**Next action:** User relaunches app (to get fixed code), retries. Then
-interactive smoke: Test Switching (OBS open); Check & Restore.
-Then `git push` (main ahead of origin/main by ~7 commits).
+**Also fixed (merge cb15b9f):** `obs_running()` only matched
+"com.obsproject.Studio" — Flatpak OBS is a bare `obs` process, so Test
+Switching wrongly said "Start OBS first". Now also `pgrep -x obs`;
+self_test precondition is just `websocket_reachable()`. VERIFIED end-to-end
+against live OBS: Connect/Laptop/Tablet/Restore all pass. Scene switching works.
+
+**Next action:** User relaunches app → Test Switching should pass now.
+Then `git push` (main ahead of origin/main ~9 commits). Feature is done + verified.
 
 **Hints:** —
