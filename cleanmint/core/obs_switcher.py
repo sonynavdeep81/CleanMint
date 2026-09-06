@@ -197,11 +197,18 @@ def _run(cmd: list[str], timeout: int = 15, **kw) -> subprocess.CompletedProcess
 
 
 def obs_running() -> bool:
-    try:
-        r = _run(["pgrep", "-f", "com.obsproject.Studio"], timeout=5)
-        return r.returncode == 0 and r.stdout.strip() != ""
-    except Exception:
-        return False
+    # Flatpak OBS runs as a bare "obs" process inside bwrap — its command line
+    # never contains "com.obsproject.Studio", so match the process name too.
+    for cmd in (["pgrep", "-x", "obs"],
+                ["pgrep", "-f", "com.obsproject.Studio"],
+                ["pgrep", "-f", "obs-studio"]):
+        try:
+            r = _run(cmd, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def websocket_reachable(timeout: float = 1.0, port: int = WS_PORT) -> bool:
@@ -666,7 +673,7 @@ def restore(labels: list[str], against: Path | None = None) -> list[StepResult]:
                 results.append(StepResult(label, True, "shortcuts re-applied"))
             elif label in ('OBS scene "Laptop"', 'OBS scene "Tablet"',
                            "OBS config folder"):
-                if obs_running():
+                if obs_running() or websocket_reachable():
                     results.append(StepResult(
                         label, False, "close OBS first, then restore"))
                 else:
@@ -771,7 +778,7 @@ def build(progress_cb=None) -> BuildResult:
         return str(p.script)
 
     def _do_websocket():
-        if obs_running():
+        if obs_running() or websocket_reachable():
             result.warnings.append(
                 "OBS is open — enable WebSocket in Tools → WebSocket Server "
                 "Settings (port 4455, authentication on), then run Build again.")
@@ -858,10 +865,11 @@ def self_test(progress_cb=None) -> list[StepResult]:
         if progress_cb:
             progress_cb(msg, pct)
 
-    if not (obs_running() and websocket_reachable()):
+    if not websocket_reachable():
         return [StepResult(
             "Precondition", False,
-            "Start OBS first (WebSocket must be reachable on port 4455).")]
+            "Start OBS first, and make sure its WebSocket server is enabled "
+            "(Tools → WebSocket Server Settings) on port 4455.")]
 
     steps: list[StepResult] = []
 

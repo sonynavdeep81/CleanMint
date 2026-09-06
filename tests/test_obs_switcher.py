@@ -121,6 +121,16 @@ check("websocket_reachable returns a bool for the real port",
 # obs_running returns a bool and does not raise
 check("obs_running returns bool", isinstance(ob.obs_running(), bool))
 
+# obs_running detects a Flatpak "obs" process (pgrep -x obs)
+_orig_run = ob._run
+ob._run = lambda cmd, timeout=15, **kw: _fake_cp(
+    "12345\n" if cmd[:2] == ["pgrep", "-x"] and cmd[-1] == "obs" else "",
+    0 if cmd[:2] == ["pgrep", "-x"] and cmd[-1] == "obs" else 1)
+check("obs_running True when 'obs' process present", ob.obs_running() is True)
+ob._run = lambda cmd, timeout=15, **kw: _fake_cp("", 1)
+check("obs_running False when no obs process", ob.obs_running() is False)
+ob._run = _orig_run
+
 
 print("\n=== OBS Switcher — set_password / _write_script ===\n")
 
@@ -240,6 +250,7 @@ ob._venv_build = _fake_venv_build
 ob._venv_ok = lambda: _venv_state["ok"]
 ob._write_shortcuts = lambda: None            # gsettings not under test here
 ob.obs_running = lambda: False
+ob.websocket_reachable = lambda *a, **k: False  # OBS "closed" for the ws patch
 
 # OBS websocket config with a password present
 p.obs_ws_config.parent.mkdir(parents=True)
@@ -272,6 +283,7 @@ ob._venv_build = lambda: None
 ob._venv_ok = lambda: True
 ob._write_shortcuts = lambda: None
 ob.obs_running = lambda: False
+ob.websocket_reachable = lambda *a, **k: False
 # no OBS config at all
 r3 = ob.build()
 check("needs_password flagged", r3.needs_password is True)
