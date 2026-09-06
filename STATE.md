@@ -33,7 +33,16 @@ Protect/Unprotect work (rm refused while locked). check_status all green.
 - `test_obs_switcher.py` now 111 checks.
 - NOTE: helper changed again → app re-prompts to update polkit helper on launch.
 
-**Next action:** User relaunches, accepts helper update, clicks "Set Up Scenes"
-→ tablet appears automatically. `git push` when ready (~19 commits ahead).
+**Fixed (merged):** installer made up to 5 pkexec prompts (mkdir/tee/chmod ×N)
+→ now ONE `pkexec sh -c` writes both files from a base64 stdin payload.
+Despite the bad UX, the user's partial install DID land the obs-v4l2 helper;
+`is_policy_installed()` is True, v4l2 device + persistence files in place.
+
+**Current machine state:** policy installed ✓, v4l2 ready + boot-persistent ✓,
+scrcpy feed NOT running (user clicks "Set Up Scenes" to start it — no password
+prompt now since v4l2 already prepared).
+
+**Next action:** User clicks "Set Up Scenes" → tablet feed starts, appears in OBS.
+`git push` when ready (~21 commits ahead of origin/main).
 
 **Hints:** —
