@@ -134,3 +134,51 @@ client.disconnect()
 def render_script(venv_py: str, pw_file: str) -> str:
     """Return the exact text of ~/.local/bin/obs-scene for these paths."""
     return _SCRIPT_TEMPLATE.format(venv_py=venv_py, pw_file=pw_file)
+
+
+def plan_shortcut_slots(
+    existing: list[str],
+    existing_cmds: dict[str, str],
+    script_path: str,
+) -> tuple[list[tuple[str, str, str, str]], list[str]]:
+    """
+    Plan where the two OBS shortcuts go without disturbing other custom
+    keybindings.
+
+    Args:
+        existing:      current custom-keybinding dconf paths (each ends with "/")
+        existing_cmds: path -> stored `command` value (may include surrounding
+                       quotes; compared loosely)
+        script_path:   absolute path to obs-scene
+
+    Returns:
+        (plan, final_list) where plan is a list of
+        (dconf_path, accelerator, name, command) and final_list is the full
+        custom-keybindings array to write back (existing order preserved,
+        new slots appended).
+    """
+    base = DCONF_MEDIA_KEYS + "custom-keybindings/"
+    final_list = list(existing)
+    plan: list[tuple[str, str, str, str]] = []
+
+    def _norm(v: str) -> str:
+        return v.strip().strip("'\"").strip()
+
+    used_paths = set(existing)
+    for accel, name, scene in HOTKEYS:
+        want_cmd = f"{script_path} {scene}"
+        reuse = None
+        for path in existing:
+            if _norm(existing_cmds.get(path, "")).endswith(f"obs-scene {scene}"):
+                reuse = path
+                break
+        if reuse is None:
+            n = 0
+            while f"{base}custom{n}/" in used_paths:
+                n += 1
+            reuse = f"{base}custom{n}/"
+            used_paths.add(reuse)
+            final_list.append(reuse)
+        plan.append((reuse, accel, name, want_cmd))
+
+    return plan, final_list

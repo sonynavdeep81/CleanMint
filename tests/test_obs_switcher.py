@@ -58,5 +58,39 @@ check("render_script embeds pw path", '"/x/pw"' in src)
 check("render_script calls set_current_program_scene",
       "set_current_program_scene(scene)" in src)
 
+print("\n=== OBS Switcher — plan_shortcut_slots ===\n")
+
+_BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
+SCRIPT = "/home/u/.local/bin/obs-scene"
+
+# custom0 = user's unrelated shortcut, custom1 = an existing obs Tablet binding
+existing = [_BASE + "custom0/", _BASE + "custom1/"]
+existing_cmds = {
+    _BASE + "custom0/": "'/usr/bin/flameshot gui'",
+    _BASE + "custom1/": f"'{SCRIPT} Tablet'",
+}
+plan, final_list = ob.plan_shortcut_slots(existing, existing_cmds, SCRIPT)
+
+by_scene = {entry[3].split()[-1]: entry for entry in plan}
+check("reuses custom1 for Tablet",
+      by_scene["Tablet"][0] == _BASE + "custom1/")
+check("allocates a fresh slot for Laptop (not custom0/custom1)",
+      by_scene["Laptop"][0] not in (_BASE + "custom0/", _BASE + "custom1/"))
+check("keeps user's custom0 in the final list",
+      _BASE + "custom0/" in final_list)
+check("final list contains both obs slots",
+      by_scene["Laptop"][0] in final_list and by_scene["Tablet"][0] in final_list)
+check("plan carries correct accelerator for Laptop",
+      by_scene["Laptop"][1] == "<Control><Alt>1")
+check("plan command is absolute script + scene",
+      by_scene["Laptop"][3] == f"{SCRIPT} Laptop")
+
+# empty starting point
+plan2, final2 = ob.plan_shortcut_slots([], {}, SCRIPT)
+check("from empty: two slots allocated", len(plan2) == 2 and len(final2) == 2)
+check("from empty: slots are custom0 and custom1",
+      sorted(final2) == [_BASE + "custom0/", _BASE + "custom1/"])
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)
