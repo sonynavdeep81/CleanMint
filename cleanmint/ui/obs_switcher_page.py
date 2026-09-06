@@ -460,11 +460,15 @@ class ObsSwitcherPage(QWidget):
     def _setup_scenes(self):
         if QMessageBox.question(
             self, "Set Up Scenes in OBS",
-            "This creates the “Laptop” and “Tablet” scenes and their capture "
-            "sources in OBS, and launches scrcpy for the tablet. Your OBS "
-            "configuration is backed up first, and existing scenes are left "
-            "untouched.\n\nOBS will show a screen-share dialog for each new "
-            "source — you pick the display / window.\n\nContinue?",
+            "This will:\n"
+            "• back up your OBS config\n"
+            "• load a virtual-camera kernel module (one password prompt, "
+            "made permanent)\n"
+            "• stream the tablet into it with scrcpy\n"
+            "• create the “Laptop” and “Tablet” scenes + their sources\n\n"
+            "The tablet appears automatically. For the Laptop scene, OBS "
+            "shows a one-time screen-share dialog to pick your display. "
+            "Working sources are left untouched.\n\nContinue?",
         ) != QMessageBox.StandardButton.Yes:
             return
 

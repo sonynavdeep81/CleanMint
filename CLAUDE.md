@@ -56,12 +56,19 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
     changed/missing/scene-name-gone; restore is per-item (OBS-config restore
     needs OBS closed; shortcut restore re-applies the two keys, never a blind
     `dconf load`)
-  - "Set Up Scenes": creates the "Laptop"/"Tablet" scenes + their
-    `pipewire-screen-capture-source` sources via the WebSocket API, and launches
-    `scrcpy --window-title="Samsung Tablet"` first. Backs up the OBS config,
-    leaves existing scenes untouched, and needs OBS running. The PipeWire
-    sources still need one portal pick each (OBS shows the dialog). This is the
-    only action that writes to the scene collection — opt-in, behind a confirm.
+  - "Set Up Scenes": creates the "Laptop"/"Tablet" scenes + sources via the
+    WebSocket API. Backs up the OBS config, leaves working sources untouched,
+    needs OBS running. Opt-in, behind a confirm — the only action that writes to
+    the scene collection.
+    - Laptop = `pipewire-screen-capture-source` (one portal pick the first time;
+      the restore token then persists)
+    - Tablet = `scrcpy --v4l2-sink=/dev/video42` → a plain `v4l2_input` source.
+      Fully automatic, NO Wayland portal, survives OBS/scrcpy restarts. Helper op
+      `obs-v4l2` loads `v4l2loopback` (video_nr=42, label "CleanMint Tablet") and
+      makes it boot-persistent (`/etc/modules-load.d`, `/etc/modprobe.d`,
+      `/etc/udev/rules.d/99-cleanmint-v4l2.rules`).
+    - `tablet_feed` status check: green when `/dev/video42` exists AND
+      `scrcpy … v4l2-sink` is running; "Set Up Scenes" (re)starts the feed.
   - "Test Switching": runs the real `obs-scene Laptop`/`Tablet` against a live
     OBS via WebSocket, confirms the program scene changed, restores the original
   - Engine `core/obs_switcher.py` (UI-free), page `ui/obs_switcher_page.py`
@@ -74,7 +81,8 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
   - **"Deletions Only" filter button** — one click shows only actual deletions across the session
 - **Polkit policy**: Installed at `/usr/share/polkit-1/actions/org.cleanmint.policy`
   - Single helper script `/usr/local/lib/cleanmint/cleanmint-helper` covers all privileged ops
-  - Covers: journalctl, snap, apt-get, systemctl, chattr (obs-lock/obs-unlock) — all with `auth_admin_keep` (one password per session)
+  - Covers: journalctl, snap, apt-get, systemctl, chattr (obs-lock/obs-unlock),
+    modprobe v4l2loopback (obs-v4l2) — all with `auth_admin_keep` (one password per session)
   - App detects if policy is missing/outdated and offers to install/update it on launch
 - **Custom app icon**: Mint-green gear on dark rounded square, generated as SVG + PNG at 7 sizes
   - Installed to `~/.local/share/icons/hicolor/` — appears in app launcher immediately

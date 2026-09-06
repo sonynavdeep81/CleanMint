@@ -87,11 +87,39 @@ case "$OPERATION" in
         done
         exit 0
         ;;
+    obs-v4l2)
+        # Load the v4l2loopback module as /dev/video42 ("CleanMint Tablet") so
+        # scrcpy can pipe the tablet screen into OBS as a plain capture device
+        # (no Wayland portal picker). Also makes it persistent across reboots.
+        nr=42
+        label="CleanMint Tablet"
+        if [[ ! -e /dev/video${nr} ]]; then
+            /sbin/modprobe v4l2loopback "video_nr=${nr}" \
+                "card_label=${label}" exclusive_caps=1 || {
+                echo "obs-v4l2: modprobe v4l2loopback failed (is it installed?)" >&2
+                exit 1
+            }
+        fi
+        # Permissions: uaccess usually grants the active user, but ensure the
+        # video group can use it too.
+        if [[ -e /dev/video${nr} ]]; then
+            /bin/chgrp video "/dev/video${nr}" 2>/dev/null || true
+            /bin/chmod 660 "/dev/video${nr}" 2>/dev/null || true
+        fi
+        # Persist across reboots.
+        printf 'options v4l2loopback video_nr=%s card_label="%s" exclusive_caps=1\n' \
+            "${nr}" "${label}" > /etc/modprobe.d/cleanmint-v4l2.conf
+        echo v4l2loopback > /etc/modules-load.d/cleanmint-v4l2.conf
+        printf 'SUBSYSTEM=="video4linux", ATTR{name}=="%s", TAG+="uaccess", MODE="0660", GROUP="video"\n' \
+            "${label}" > /etc/udev/rules.d/99-cleanmint-v4l2.rules
+        exit 0
+        ;;
     *)
         echo "cleanmint-helper: unknown operation '${OPERATION}'" >&2
         echo "Valid: journal-vacuum, apt-clean, apt-update, apt-upgrade, apt-upgrade-pkgs," >&2
         echo "       snap-remove, snap-uninstall, apt-remove," >&2
-        echo "       flatpak-uninstall, systemctl-restart, obs-lock, obs-unlock" >&2
+        echo "       flatpak-uninstall, systemctl-restart, obs-lock, obs-unlock," >&2
+        echo "       obs-v4l2" >&2
         exit 1
         ;;
 esac
