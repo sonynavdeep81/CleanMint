@@ -28,6 +28,8 @@ HOTKEYS = [
     ("<Control><Alt>2", "OBS — Tablet", "Tablet"),
 ]
 MAX_BACKUPS = 10
+V4L2_NR = 42
+V4L2_DEVICE = f"/dev/video{V4L2_NR}"
 DCONF_MEDIA_KEYS = "/org/gnome/settings-daemon/plugins/media-keys/"
 MEDIA_KEYS_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 CUSTOM_KEYBINDING_SCHEMA = (
@@ -531,6 +533,17 @@ def check_status() -> list[Check]:
         else "not detected (USB + debugging)",
         fixable=False, manual_steps=_STEPS_TABLET,
     ))
+    feed_ok = v4l2_ready() and scrcpy_v4l2_running()
+    checks.append(Check(
+        "tablet_feed", "Tablet live feed",
+        feed_ok,
+        "streaming to OBS" if feed_ok
+        else ("virtual camera loaded, feed stopped" if v4l2_ready()
+              else "not set up"),
+        fixable=False,
+        manual_steps='Click "Set Up Scenes" to load the virtual camera and '
+                     "start streaming the tablet into OBS.",
+    ))
     checks.append(Check(
         "protection", "File protection", True,
         "Locked" if is_locked() else "Unlocked", fixable=False,
@@ -892,49 +905,51 @@ def _obs_py(body: str, timeout: int = 60) -> tuple[dict | None, str]:
         return None, f"unexpected response ({e})"
 
 
-_SETUP_QUERY = (
-    "scenes = [s['sceneName'] for s in c.get_scene_list().scenes]\n"
-    "out = {'scenes': scenes, 'src': {}}\n"
-    "for sc in ('Laptop', 'Tablet'):\n"
-    "    if sc not in scenes:\n"
-    "        out['src'][sc] = None\n"
-    "        continue\n"
-    "    try:\n"
-    "        out['src'][sc] = [i['sourceName'] "
-    "for i in c.get_scene_item_list(sc).scene_items]\n"
-    "    except Exception:\n"
-    "        out['src'][sc] = []\n"
-    "print(json.dumps(out))\n"
-)
-
-_SETUP_CREATE = (
-    "want = {'Laptop': 'HP Laptop', 'Tablet': 'Samsung Tablet'}\n"
-    "res = {'created_scenes': [], 'created_sources': [], "
-    "'existing': [], 'errors': []}\n"
-    "scenes = [s['sceneName'] for s in c.get_scene_list().scenes]\n"
-    "for sc in ('Laptop', 'Tablet'):\n"
-    "    if sc not in scenes:\n"
-    "        try:\n"
-    "            c.create_scene(sc)\n"
-    "            res['created_scenes'].append(sc)\n"
-    "        except Exception as e:\n"
-    "            res['errors'].append('scene %s: %s' % (sc, e))\n"
-    "for sc, src in want.items():\n"
-    "    try:\n"
-    "        items = c.get_scene_item_list(sc).scene_items\n"
-    "    except Exception as e:\n"
-    "        res['errors'].append('list %s: %s' % (sc, e))\n"
-    "        continue\n"
-    "    if items:\n"
-    "        res['existing'].append('%s: %s' % (sc, items[0]['sourceName']))\n"
-    "        continue\n"
-    "    try:\n"
-    "        c.create_input(sc, src, 'pipewire-screen-capture-source', {}, True)\n"
-    "        res['created_sources'].append('%s / %s' % (sc, src))\n"
-    "    except Exception as e:\n"
-    "        res['errors'].append('source %s/%s: %s' % (sc, src, e))\n"
-    "print(json.dumps(res))\n"
-)
+def _setup_create_snippet() -> str:
+    """OBS-side scene/source creation. Laptop = PipeWire screen capture (its
+    restore token is stable); Tablet = v4l2 capture of the scrcpy feed
+    (/dev/videoN — no Wayland portal, survives restarts)."""
+    dev = V4L2_DEVICE
+    return (
+        "res = {'created_scenes': [], 'created_sources': [], 'existing': [], "
+        "'replaced': [], 'errors': []}\n"
+        "scenes = [s['sceneName'] for s in c.get_scene_list().scenes]\n"
+        "for sc in ('Laptop', 'Tablet'):\n"
+        "    if sc not in scenes:\n"
+        "        try:\n"
+        "            c.create_scene(sc); res['created_scenes'].append(sc)\n"
+        "        except Exception as e:\n"
+        "            res['errors'].append('scene %s: %s' % (sc, e))\n"
+        "try:\n"
+        "    items = c.get_scene_item_list('Laptop').scene_items\n"
+        "    if items:\n"
+        "        res['existing'].append('Laptop: ' + items[0]['sourceName'])\n"
+        "    else:\n"
+        "        c.create_input('Laptop', 'HP Laptop', "
+        "'pipewire-screen-capture-source', {}, True)\n"
+        "        res['created_sources'].append('Laptop / HP Laptop')\n"
+        "except Exception as e:\n"
+        "    res['errors'].append('Laptop source: %s' % e)\n"
+        "try:\n"
+        "    items = c.get_scene_item_list('Tablet').scene_items\n"
+        "    good = [i for i in items if i.get('inputKind') == 'v4l2_input']\n"
+        "    if good:\n"
+        "        res['existing'].append('Tablet: ' + good[0]['sourceName'])\n"
+        "    else:\n"
+        "        for i in items:\n"
+        "            try:\n"
+        "                c.remove_input(i['sourceName'])\n"
+        "                res['replaced'].append(i['sourceName'])\n"
+        "            except Exception as e:\n"
+        "                res['errors'].append('remove %s: %s' "
+        "% (i['sourceName'], e))\n"
+        f"        c.create_input('Tablet', 'Samsung Tablet', 'v4l2_input', "
+        f"{{'device_id': '{dev}'}}, True)\n"
+        "        res['created_sources'].append('Tablet / Samsung Tablet')\n"
+        "except Exception as e:\n"
+        "    res['errors'].append('Tablet source: %s' % e)\n"
+        "print(json.dumps(res))\n"
+    )
 
 
 def _scrcpy_binary() -> str | None:
@@ -948,14 +963,48 @@ def _scrcpy_binary() -> str | None:
     return None
 
 
-def scrcpy_running() -> bool:
+def v4l2_ready() -> bool:
+    """True if the CleanMint v4l2loopback device exists and we can read it."""
     try:
-        return _run(["pgrep", "-x", "scrcpy"], timeout=5).returncode == 0
+        st = os.stat(V4L2_DEVICE)
+        return stat.S_ISCHR(st.st_mode) and os.access(V4L2_DEVICE, os.R_OK)
+    except OSError:
+        return False
+
+
+_V4L2_PERSIST = Path("/etc/modules-load.d/cleanmint-v4l2.conf")
+
+
+def _ensure_v4l2() -> tuple[bool, str]:
+    """Load the v4l2loopback module + make it boot-persistent (pkexec helper).
+
+    Skips the prompt only when the device is already present AND the
+    boot-persistence file is in place.
+    """
+    import time
+    if v4l2_ready() and _V4L2_PERSIST.exists():
+        return True, f"virtual camera ready ({V4L2_DEVICE})"
+    ok, err = _pkexec_helper("obs-v4l2")
+    if not ok:
+        return False, err or "could not load v4l2loopback"
+    for _ in range(10):
+        time.sleep(0.4)
+        if v4l2_ready():
+            return True, f"virtual camera ready ({V4L2_DEVICE})"
+    return False, f"{V4L2_DEVICE} did not appear after loading v4l2loopback"
+
+
+def scrcpy_v4l2_running() -> bool:
+    try:
+        r = _run(["pgrep", "-af", "scrcpy"], timeout=5)
+        return r.returncode == 0 and "v4l2-sink" in r.stdout
     except Exception:
         return False
 
 
-def _launch_scrcpy() -> tuple[bool, str]:
+def _start_scrcpy_v4l2() -> tuple[bool, str]:
+    """(Re)start scrcpy feeding the tablet screen into the v4l2 device."""
+    import time
     binary = _scrcpy_binary()
     if not binary:
         return False, ("scrcpy not found — download the official static "
@@ -964,12 +1013,18 @@ def _launch_scrcpy() -> tuple[bool, str]:
         return False, ("no tablet detected — connect it by USB and authorise "
                        "USB debugging")
     try:
+        _run(["pkill", "-f", "scrcpy.*v4l2-sink"], timeout=5)
+        time.sleep(0.5)
+    except Exception:
+        pass
+    try:
         subprocess.Popen(
-            [binary, "--window-title=Samsung Tablet"],
+            [binary, f"--v4l2-sink={V4L2_DEVICE}", "--no-audio", "--no-window",
+             "--stay-awake"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        return True, 'launched (window "Samsung Tablet")'
+        return True, f"tablet screen → {V4L2_DEVICE}"
     except Exception as e:  # noqa: BLE001
         return False, str(e)
 
@@ -978,8 +1033,12 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
     """Create the Laptop/Tablet scenes and their capture sources in OBS.
 
     Needs OBS running with the WebSocket server enabled. Backs up the OBS
-    config first. The PipeWire capture sources still need one portal pick
-    each (choose the display / the scrcpy window) — OBS shows that dialog.
+    config first and leaves already-working sources untouched.
+
+    - Laptop: PipeWire screen capture (needs one portal pick the first time;
+      its restore token then persists).
+    - Tablet: scrcpy → v4l2loopback → a plain Video Capture Device source.
+      Fully automatic, no portal, survives restarts.
     """
     import time
 
@@ -994,36 +1053,36 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
 
     steps: list[StepResult] = []
 
-    prog("Backing up OBS configuration…", 10)
+    prog("Backing up OBS configuration…", 8)
     try:
         backup()
         steps.append(StepResult("Backup", True, "OBS config backed up"))
     except Exception as e:  # noqa: BLE001
         steps.append(StepResult("Backup", False, str(e)))
 
-    prog("Reading current scenes…", 25)
-    state, err = _obs_py(_SETUP_QUERY)
-    if state is None:
-        steps.append(StepResult("Read OBS", False, err))
-        return steps
+    prog("Preparing the virtual camera…", 22)
+    v_ok, v_msg = _ensure_v4l2()
+    steps.append(StepResult("Virtual camera", v_ok, v_msg))
 
-    tablet_src = state.get("src", {}).get("Tablet")
-    if not tablet_src and not scrcpy_running():
-        prog("Starting scrcpy…", 40)
-        ok, msg = _launch_scrcpy()
-        steps.append(StepResult("Start scrcpy", ok, msg))
-        if ok:
-            prog("Waiting for the tablet window…", 55)
-            time.sleep(3.0)
+    if v_ok:
+        prog("Starting the tablet feed…", 42)
+        s_ok, s_msg = _start_scrcpy_v4l2()
+        steps.append(StepResult("Tablet feed (scrcpy)", s_ok, s_msg))
+        if s_ok:
+            prog("Waiting for the tablet picture…", 58)
+            time.sleep(4.0)
 
-    prog("Creating scenes and sources…", 75)
-    res, err = _obs_py(_SETUP_CREATE)
+    prog("Creating scenes and sources in OBS…", 80)
+    res, err = _obs_py(_setup_create_snippet())
     if res is None:
         steps.append(StepResult("Create scenes", False, err))
         return steps
 
     for s in res.get("created_scenes", []):
         steps.append(StepResult(f"Scene “{s}”", True, "created"))
+    for s in res.get("replaced", []):
+        steps.append(StepResult(f"Replaced old source “{s}”", True,
+                                "swapped for the v4l2 capture"))
     for s in res.get("created_sources", []):
         steps.append(StepResult(f"Source {s}", True, "created"))
     for s in res.get("existing", []):
@@ -1031,12 +1090,11 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
     for e in res.get("errors", []):
         steps.append(StepResult("OBS", False, e))
 
-    if res.get("created_sources"):
+    if any("Laptop / HP Laptop" in s for s in res.get("created_sources", [])):
         steps.append(StepResult(
-            "Finish in OBS", True,
-            "OBS is showing a screen-share dialog for each new source — "
-            "pick your laptop display for “HP Laptop”, and the "
-            "“Samsung Tablet” window for “Samsung Tablet”."))
+            "Finish the Laptop scene", True,
+            "OBS is showing a screen-share dialog for “HP Laptop” — pick your "
+            "laptop display once (it is remembered after that)."))
 
     prog("Done.", 100)
     return steps
