@@ -17,9 +17,15 @@ an update install failed/was cancelled — `_check_polkit_setup` now records
 On this machine `is_policy_installed()` is already True + helper current
 (verified lock/unlock work end-to-end) → no prompt should appear.
 
-**Next action:** User runs the interactive smoke test — OBS Switcher page: with
-OBS open click "Test Switching"; "Protect Files" then confirm
-`rm ~/.local/bin/obs-scene` is refused; "Unprotect Files"; "Check & Restore".
-Then `git push` (main is ahead of origin/main).
+**Also fixed (merge 2f54a09):** Build/Repair failed with "Operation not
+permitted" when protection was ON (chattr +i). `build()` now returns
+`needs_unlock`; the page offers unprotect→repair→re-protect in one step.
+`websocket_reachable(port=…)` added so tests don't assume 4455 is free.
+User's files are currently LOCKED (they clicked Protect) — expected.
+Their status list is all-green; Build/Repair is only for a broken setup.
+
+**Next action:** User relaunches app (to get fixed code), retries. Then
+interactive smoke: Test Switching (OBS open); Check & Restore.
+Then `git push` (main ahead of origin/main by ~7 commits).
 
 **Hints:** —
