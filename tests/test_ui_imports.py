@@ -48,6 +48,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 check("ui.main_window",  lambda: __import__("ui.main_window"))
 check("ui.dashboard",    lambda: __import__("ui.dashboard"))
 check("ui.cleaner_page", lambda: __import__("ui.cleaner_page"))
+check("ui.obs_switcher_page", lambda: __import__("ui.obs_switcher_page"))
 
 print("\n4. Theme palette sanity")
 from ui.theme import Theme, DARK, LIGHT

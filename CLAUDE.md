@@ -37,6 +37,29 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
     (~1–1.5× video length to process; 1.5 GB model downloaded once to `~/.cache/huggingface`)
   - "Use Chrome cookies" checkbox for age-restricted videos
   - Engine in `core/transcriber.py` (UI-free), page in `ui/transcriber_page.py`
+- **OBS Switcher page**: Builds/repairs/protects/tests the laptop⇄Samsung-tablet
+  OBS scene-switching setup (Ctrl+Alt+1 → Laptop, Ctrl+Alt+2 → Tablet). See `obs.md`.
+  - Status checklist: OBS, WebSocket, password file, venv, obs-scene script,
+    GNOME shortcuts, scenes, scrcpy, adb, tablet — non-fixable rows show manual steps
+  - "Build / Repair Setup": creates `~/.obs-hotkey-venv` + obsws-python, writes
+    `~/.local/bin/obs-scene`, copies the WebSocket password from OBS's own
+    `plugin_config/obs-websocket/config.json` (prompts if absent), enables OBS
+    WebSocket (only while OBS is closed, backed up first), writes the two GNOME
+    shortcuts additively (never disturbs other custom keybindings). Idempotent.
+  - "Protect Files" / "Unprotect Files": `chattr +i` / `-i` on
+    `~/.local/bin/obs-scene` + `~/.config/obs-hotkeys/` via
+    `cleanmint-helper obs-lock` / `obs-unlock` (one pkexec prompt). Helper derives
+    the paths from `PKEXEC_UID`'s home — cannot be pointed at other files.
+  - "Back Up Now" + "Check & Restore": versioned backups (last 10) of the OBS
+    config folder, GNOME shortcuts, script and password under
+    `~/.local/share/cleanmint/obs-switcher/backups/`; verify detects
+    changed/missing/scene-name-gone; restore is per-item (OBS-config restore
+    needs OBS closed; shortcut restore re-applies the two keys, never a blind
+    `dconf load`)
+  - "Test Switching": runs the real `obs-scene Laptop`/`Tablet` against a live
+    OBS via WebSocket, confirms the program scene changed, restores the original
+  - Engine `core/obs_switcher.py` (UI-free), page `ui/obs_switcher_page.py`
+  - NEVER edits OBS scene contents
 - **Settings page**: Dark/light mode, persistent JSON settings
 - **Logs page**: Shows CleanMint session logs with color-coded highlighting
   - `[DELETED]` / `[SNAP REMOVED]` lines highlighted red — shows exactly what was removed
@@ -45,7 +68,7 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
   - **"Deletions Only" filter button** — one click shows only actual deletions across the session
 - **Polkit policy**: Installed at `/usr/share/polkit-1/actions/org.cleanmint.policy`
   - Single helper script `/usr/local/lib/cleanmint/cleanmint-helper` covers all privileged ops
-  - Covers: journalctl, snap, apt-get, systemctl — all with `auth_admin_keep` (one password per session)
+  - Covers: journalctl, snap, apt-get, systemctl, chattr (obs-lock/obs-unlock) — all with `auth_admin_keep` (one password per session)
   - App detects if policy is missing/outdated and offers to install/update it on launch
 - **Custom app icon**: Mint-green gear on dark rounded square, generated as SVG + PNG at 7 sizes
   - Installed to `~/.local/share/icons/hicolor/` — appears in app launcher immediately
@@ -224,6 +247,8 @@ Cleanmint/
       snapshot.py                  # Snapshot engine: capture packages, diff, generate restore.sh
       printer.py                   # CUPS printer lister + restore script generator
       vscode.py                    # VS Code extension/settings reader + restore script generator
+      transcriber.py               # YouTube caption/whisper transcript engine
+      obs_switcher.py              # OBS laptop⇄tablet switch: build/check/lock/backup/self-test
       installer.py                 # Polkit policy + helper installer (pkexec tee)
       reporter.py                  # PDF report export
     ui/
@@ -237,6 +262,8 @@ Cleanmint/
       snapshot_page.py             # Snapshot page (take, export, compare, delete)
       printer_page.py              # Printer Profile page (CUPS printer list, export restore script)
       vscode_page.py               # VS Code Profile page (extensions viewer, export restore script)
+      transcriber_page.py          # Transcriber page
+      obs_switcher_page.py         # OBS Switcher page (status list, build, protect, backup, test)
       settings_page.py             # Settings page
       logs_page.py                 # Logs page
     config/
@@ -249,6 +276,8 @@ Cleanmint/
     test_ui_imports.py
     test_backend_phase5.py
     test_integration.py
+    test_transcriber.py
+    test_obs_switcher.py           # OBS Switcher engine (sandboxed HOME, mocked OBS)
 ```
 
 ---

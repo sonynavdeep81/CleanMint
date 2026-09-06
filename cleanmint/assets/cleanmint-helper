@@ -66,11 +66,32 @@ case "$OPERATION" in
         [[ $# -ge 1 ]] || { echo "flatpak-uninstall requires <app-id>" >&2; exit 1; }
         exec /usr/bin/flatpak uninstall -y "$1"
         ;;
+    obs-lock|obs-unlock)
+        # Toggle the immutable (+i) attribute on the OBS-switcher files that
+        # must never be modified or deleted. Paths are derived from the
+        # calling user's home — this op can only ever touch this fixed list.
+        home="$(getent passwd "${PKEXEC_UID:-0}" | cut -d: -f6)"
+        [[ -n "$home" && -d "$home" ]] || {
+            echo "obs-lock: cannot resolve caller home directory" >&2
+            exit 1
+        }
+        flag="+i"
+        [[ "$OPERATION" == "obs-unlock" ]] && flag="-i"
+        for rel in ".local/bin/obs-scene" \
+                   ".config/obs-hotkeys/password" \
+                   ".config/obs-hotkeys"; do
+            target="$home/$rel"
+            if [[ -e "$target" ]]; then
+                /usr/bin/chattr "$flag" "$target" 2>/dev/null || true
+            fi
+        done
+        exit 0
+        ;;
     *)
         echo "cleanmint-helper: unknown operation '${OPERATION}'" >&2
         echo "Valid: journal-vacuum, apt-clean, apt-update, apt-upgrade, apt-upgrade-pkgs," >&2
         echo "       snap-remove, snap-uninstall, apt-remove," >&2
-        echo "       flatpak-uninstall, systemctl-restart" >&2
+        echo "       flatpak-uninstall, systemctl-restart, obs-lock, obs-unlock" >&2
         exit 1
         ;;
 esac
