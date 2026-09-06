@@ -25,19 +25,52 @@ HELPER  = "/usr/local/lib/cleanmint/cleanmint-helper"
 # Snaps that must NEVER be removed even when their revision is disabled.
 # These are GPU drivers, platform runtimes, and content providers that other
 # snaps depend on silently — removing them breaks apps without warning.
+# Historical: a blanket name list used to be skipped entirely (bug #21). That
+# also hid ~2 GB of genuinely-superseded revisions. The real guard is now
+# "the snap must still have an active revision" — see list_removable_snap_revisions.
 _PROTECTED_SNAPS: frozenset[str] = frozenset({
-    # GPU / Mesa drivers
     "mesa-2404", "mesa-2204",
-    # Snap base runtimes
     "core", "core18", "core20", "core22", "core24",
-    # GNOME platform content snaps
     "gnome-3-28-1804", "gnome-3-34-1804", "gnome-3-38-2004",
     "gnome-42-2204", "gnome-44-2304", "gnome-46-2404",
-    # Common theme / icon content snaps
-    "gtk-common-themes",
-    # Snap infrastructure
-    "snapd",
+    "gtk-common-themes", "snapd",
 })
+
+
+def list_removable_snap_revisions() -> list[tuple[str, str, int]]:
+    """Disabled snap revisions that are SAFE to remove: (name, revision, bytes).
+
+    A disabled revision is safe to drop ONLY when the same snap still has an
+    active (non-disabled) revision — so we can never remove the last copy of
+    mesa / a GNOME platform / a core base and break the desktop (bug #21). A
+    snap that is entirely disabled keeps all its revisions.
+    """
+    try:
+        out = subprocess.run(
+            ["snap", "list", "--all"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if out.returncode != 0:
+            return []
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return []
+
+    rows: list[tuple[str, str, bool]] = []          # (name, rev, disabled)
+    for line in out.stdout.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 6:
+            rows.append((parts[0], parts[2], "disabled" in parts[5]))
+
+    has_active = {name for name, _rev, dis in rows if not dis}
+    snap_base = Path("/var/lib/snapd/snaps")
+    removable: list[tuple[str, str, int]] = []
+    for name, rev, dis in rows:
+        if not dis or name not in has_active:
+            continue
+        f = snap_base / f"{name}_{rev}.snap"
+        size = f.stat().st_size if f.exists() else 0
+        removable.append((name, rev, size))
+    return removable
 
 
 @dataclass
@@ -183,35 +216,16 @@ class Cleaner:
     # ------------------------------------------------------------------
 
     def _clean_snap_revisions(self, result: "CleanResult") -> "CleanResult":
-        """Remove all disabled snap revisions in ONE pkexec call — single password prompt."""
-        mode = "[DRY RUN] " if self.dry_run else ""
+        """Remove superseded disabled snap revisions (each snap keeps its
+        active revision) via per-revision pkexec calls — one password prompt."""
         try:
-            snap_list = subprocess.run(
-                ["snap", "list", "--all"],
-                capture_output=True, text=True, timeout=15
-            )
-            snap_base = Path("/var/lib/snapd/snaps")
-
-            # Collect all disabled revisions first
-            pending = []
-            for line in snap_list.stdout.splitlines()[1:]:
-                parts = line.split()
-                if len(parts) >= 6 and "disabled" in parts[5]:
-                    name, rev = parts[0], parts[2]
-                    if name in _PROTECTED_SNAPS:
-                        self._log(
-                            f"[SNAP PROTECTED] Skipping {name} rev {rev} "
-                            f"— platform/GPU snap, never auto-removed.",
-                            "warning",
-                        )
-                        result.skipped_count += 1
-                        continue
-                    snap_file = snap_base / f"{name}_{rev}.snap"
-                    size = snap_file.stat().st_size if snap_file.exists() else 0
-                    pending.append((name, rev, size))
+            # Only revisions whose snap still has an active copy (bug #21).
+            pending = list_removable_snap_revisions()
 
             if not pending:
-                self._progress("No disabled snap revisions found.", 100)
+                self._progress(
+                    "No removable snap revisions (every disabled one is the "
+                    "last copy of its snap).", 100)
                 return result
 
             # Log all actions

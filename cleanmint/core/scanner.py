@@ -331,6 +331,10 @@ class Scanner:
         cat.file_count = count
         return cat
 
+    # Journal vacuum keeps 50 MB / 7 days (see cleaner._clean_journal), so only
+    # the amount above that floor is actually recoverable.
+    _JOURNAL_KEEP_BYTES = 50 * 1024 * 1024
+
     def _scan_journal_logs(self) -> ScanCategory:
         cat = ScanCategory(
             id="journal_logs",
@@ -344,7 +348,7 @@ class Scanner:
             cat.size_bytes, cat.file_count = self._scan_dirs(cat.paths)
         else:
             size, _, err = _journal_size()
-            cat.size_bytes = size
+            cat.size_bytes = max(0, size - self._JOURNAL_KEEP_BYTES)
             cat.error = err
         return cat
 
@@ -390,30 +394,17 @@ class Scanner:
         if self._sandbox:
             return cat  # Skip real snap commands in sandbox mode
 
+        # Count only what the cleaner will actually remove: superseded
+        # disabled revisions whose snap still has an active copy (bug #21).
         try:
-            result = subprocess.run(
-                ["snap", "list", "--all"],
-                capture_output=True, text=True, timeout=15
-            )
-            if result.returncode != 0:
-                cat.error = "snap not available"
-                return cat
-
+            from core.cleaner import list_removable_snap_revisions
+            snap_base = Path("/var/lib/snapd/snaps")
             total_size = 0
             count = 0
-            snap_base = Path("/var/lib/snapd/snaps")
-
-            for line in result.stdout.splitlines()[1:]:  # skip header
-                parts = line.split()
-                if len(parts) >= 6 and "disabled" in parts[5]:
-                    name = parts[0]
-                    rev = parts[2]
-                    snap_file = snap_base / f"{name}_{rev}.snap"
-                    if snap_file.exists():
-                        total_size += _file_size(snap_file)
-                        count += 1
-                        cat.paths.append(snap_file)
-
+            for name, rev, size in list_removable_snap_revisions():
+                total_size += size
+                count += 1
+                cat.paths.append(snap_base / f"{name}_{rev}.snap")
             cat.size_bytes = total_size
             cat.file_count = count
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
