@@ -57,39 +57,60 @@ class RestoreDialog(QDialog):
     def __init__(self, items: list[ob.VerifyItem], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Check & Restore")
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(480)
         self.setStyleSheet(Theme.stylesheet())
+        p = Theme.p()
         self._boxes: list[tuple[QCheckBox, str]] = []
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 20, 20, 20)
         lay.setSpacing(10)
 
-        title = QLabel("Comparison with the most recent backup:")
+        restorable = [it for it in items
+                      if it.status in ("changed", "missing") and it.can_restore]
+
+        title = QLabel("Comparison with your most recent backup")
         title.setObjectName("TitleLabel")
         lay.addWidget(title)
 
+        if not restorable:
+            ok = QLabel("✓  Everything matches your most recent backup — "
+                        "nothing needs restoring.")
+            ok.setWordWrap(True)
+            ok.setStyleSheet(f"color: {p.success};")
+            lay.addWidget(ok)
+
         icon = {"ok": "✓", "changed": "!", "missing": "✗"}
+        colour = {"ok": p.success, "changed": p.warning, "missing": p.danger}
         for it in items:
-            box = QCheckBox(
-                f"{icon.get(it.status, '?')}  {it.label} — {it.status}")
-            restorable = it.status in ("changed", "missing") and it.can_restore
-            box.setEnabled(restorable)
-            box.setChecked(restorable)
-            lay.addWidget(box)
-            self._boxes.append((box, it.label))
+            can = it in restorable
+            text = f"{icon.get(it.status, '?')}  {it.label} — {it.status}"
+            if it.status in ("changed", "missing") and not it.can_restore:
+                text += " (no backup copy)"
+            if can:
+                box = QCheckBox(text)
+                box.setChecked(True)
+                lay.addWidget(box)
+                self._boxes.append((box, it.label))
+            else:
+                row = QLabel(text)
+                row.setStyleSheet(f"color: {colour.get(it.status, p.text_muted)};"
+                                  " padding-left: 2px;")
+                lay.addWidget(row)
 
         btns = QDialogButtonBox()
-        btns.addButton("Restore Selected",
-                       QDialogButtonBox.ButtonRole.AcceptRole)
-        btns.addButton(QDialogButtonBox.StandardButton.Cancel)
+        if restorable:
+            btns.addButton("Restore Selected",
+                           QDialogButtonBox.ButtonRole.AcceptRole)
+            btns.addButton(QDialogButtonBox.StandardButton.Cancel)
+        else:
+            btns.addButton(QDialogButtonBox.StandardButton.Close)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
 
     def selected_labels(self) -> list[str]:
-        return [label for box, label in self._boxes
-                if box.isChecked() and box.isEnabled()]
+        return [label for box, label in self._boxes if box.isChecked()]
 
 
 class TestReportDialog(QDialog):
