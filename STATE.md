@@ -53,7 +53,14 @@ start scrcpy on the free device → verify the feed connected (scans scrcpy log
 for write errors) → recreate the OBS source. Verified: live Samsung Notes in OBS.
 `test_obs_switcher.py` 114 checks.
 
-**Next action:** feature complete + pushed. User clicks "Set Up Scenes" to
-(re)start the feed after reboots or after deleting a scene.
+**Laptop scene (merged 13b20f7):** pipewire-screen-capture-source genuinely
+needs a ONE-TIME Wayland portal pick — no API bypass, stale RestoreTokens
+don't reconnect (tested: white/black). Set Up Scenes now opens the "HP Laptop"
+Properties dialog (triggers the portal picker) + adds a "Finish the Laptop
+scene" step. Tablet create hardened against orphaned "Samsung Tablet" input.
+
+**Next action:** User: in OBS, the "HP Laptop" Properties/portal dialog →
+pick the monitor once → Close. Tablet needs nothing. Then done for good
+(the laptop token persists after a real pick). `test_obs_switcher.py` 114.
 
 **Hints:** —
