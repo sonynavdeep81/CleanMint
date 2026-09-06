@@ -29,6 +29,7 @@ NAV_ITEMS = [
     ("printer",     "⎙  Printer"),
     ("screenshot",  "⊙  Screenshot"),
     ("transcriber", "▶  Transcriber"),
+    ("obs_switcher", "⇄  OBS Switcher"),
     ("settings",    "⚙  Settings"),
     ("logs",        "▤  Logs"),
 ]
@@ -191,6 +192,9 @@ class MainWindow(QMainWindow):
         elif key == "transcriber":
             from ui.transcriber_page import TranscriberPage
             return TranscriberPage()
+        elif key == "obs_switcher":
+            from ui.obs_switcher_page import ObsSwitcherPage
+            return ObsSwitcherPage()
         elif key == "settings":
             from ui.settings_page import SettingsPage
             return SettingsPage()
