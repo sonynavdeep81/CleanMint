@@ -362,13 +362,16 @@ ob._start_scrcpy_v4l2 = lambda: (_feed.append(1), (True, "feeding"))[1]
 ob._obs_py = lambda body, timeout=60: (
     {"created_scenes": ["Laptop", "Tablet"],
      "created_sources": ["Laptop / HP Laptop", "Tablet / Samsung Tablet"],
-     "existing": [], "replaced": [], "errors": []}, "")
+     "existing": [], "replaced": [], "fitted": ["Laptop", "Tablet"],
+     "errors": []}, "")
 s1 = ob.setup_scenes()
 check("fresh: v4l2 prepared", any(s.label == "Virtual camera" and s.ok
                                   for s in s1))
 check("fresh: tablet feed started once", _feed == [1])
 check("fresh: two scenes created", sum("Scene" in s.label for s in s1) == 2)
 check("fresh: two sources created", sum("Source " in s.label for s in s1) == 2)
+check("fresh: fit-to-screen step shown",
+      any(s.label == "Fit to screen" for s in s1))
 check("fresh: laptop portal note shown",
       any("Finish the Laptop scene" in s.label for s in s1))
 check("fresh: no failures", all(s.ok for s in s1))

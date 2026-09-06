@@ -948,6 +948,25 @@ def _setup_create_snippet() -> str:
         "        res['created_sources'].append('Tablet / Samsung Tablet')\n"
         "except Exception as e:\n"
         "    res['errors'].append('Tablet source: %s' % e)\n"
+        "# Fit every source to the canvas (no stripes / letterboxing).\n"
+        "try:\n"
+        "    v = c.get_video_settings()\n"
+        "    W, H = float(v.base_width), float(v.base_height)\n"
+        "    for sc in ('Laptop', 'Tablet'):\n"
+        "        try:\n"
+        "            for it in c.get_scene_item_list(sc).scene_items:\n"
+        "                c.set_scene_item_transform(sc, it['sceneItemId'], {\n"
+        "                    'boundsType': 'OBS_BOUNDS_SCALE_INNER',\n"
+        "                    'boundsWidth': W, 'boundsHeight': H,\n"
+        "                    'boundsAlignment': 0,\n"
+        "                    'positionX': 0.0, 'positionY': 0.0,\n"
+        "                    'alignment': 5,\n"
+        "                })\n"
+        "            res.setdefault('fitted', []).append(sc)\n"
+        "        except Exception as e:\n"
+        "            res['errors'].append('fit %s: %s' % (sc, e))\n"
+        "except Exception as e:\n"
+        "    res['errors'].append('fit: %s' % e)\n"
         "print(json.dumps(res))\n"
     )
 
@@ -1087,6 +1106,10 @@ def setup_scenes(progress_cb=None) -> list[StepResult]:
         steps.append(StepResult(f"Source {s}", True, "created"))
     for s in res.get("existing", []):
         steps.append(StepResult(f"Already set up — {s}", True, "left as-is"))
+    if res.get("fitted"):
+        steps.append(StepResult(
+            "Fit to screen", True,
+            "scaled " + " + ".join(res["fitted"]) + " to fill the canvas"))
     for e in res.get("errors", []):
         steps.append(StepResult("OBS", False, e))
 
