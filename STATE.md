@@ -31,6 +31,6 @@ self_test precondition is just `websocket_reachable()`. VERIFIED end-to-end
 against live OBS: Connect/Laptop/Tablet/Restore all pass. Scene switching works.
 
 **Next action:** User relaunches app → Test Switching should pass now.
-Then `git push` (main ahead of origin/main ~9 commits). Feature is done + verified.
+Then `git push` (main ahead of origin/main ~12 commits. Also: Build no longer warns about WebSocket when it is already enabled (merge on main).
 
 **Hints:** —
