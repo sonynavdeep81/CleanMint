@@ -92,10 +92,13 @@ class BuildResult:
     steps: list[StepResult] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     needs_password: bool = False
+    needs_unlock: bool = False
 
     @property
     def ok(self) -> bool:
-        return all(s.ok for s in self.steps) and not self.needs_password
+        return (all(s.ok for s in self.steps)
+                and not self.needs_password
+                and not self.needs_unlock)
 
 
 @dataclass
@@ -201,9 +204,9 @@ def obs_running() -> bool:
         return False
 
 
-def websocket_reachable(timeout: float = 1.0) -> bool:
+def websocket_reachable(timeout: float = 1.0, port: int = WS_PORT) -> bool:
     try:
-        with socket.create_connection(("127.0.0.1", WS_PORT), timeout=timeout):
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
             return True
     except OSError:
         return False
@@ -716,6 +719,16 @@ def build(progress_cb=None) -> BuildResult:
     """Run every auto-fixable setup step, idempotently."""
     p = _paths()
     result = BuildResult()
+
+    # The script + password live behind chattr +i when protection is on;
+    # writing to them would fail. Surface this instead of half-failing.
+    if is_locked():
+        result.needs_unlock = True
+        result.steps.append(StepResult(
+            "File protection", False,
+            "the switch script and password are protected — unprotect them "
+            "first (this page can do it, then re-protect afterwards)."))
+        return result
 
     def step(label, pct, fn):
         if progress_cb:
