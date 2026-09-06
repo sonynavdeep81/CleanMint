@@ -59,8 +59,14 @@ don't reconnect (tested: white/black). Set Up Scenes now opens the "HP Laptop"
 Properties dialog (triggers the portal picker) + adds a "Finish the Laptop
 scene" step. Tablet create hardened against orphaned "Samsung Tablet" input.
 
-**Next action:** User: in OBS, the "HP Laptop" Properties/portal dialog →
-pick the monitor once → Close. Tablet needs nothing. Then done for good
-(the laptop token persists after a real pick). `test_obs_switcher.py` 114.
+**Feed now a systemd user service (merged d9673b7):** scrcpy kept dying
+(tablet relock / USB blip) → frozen frame. `cleanmint-obs-tablet-feed.service`
+(Restart=always, RestartSec=8, enabled) auto-starts on login + auto-restarts.
+Installed + active on this machine. `install_feed_service()` /
+`feed_service_active()` / `restart_feed_service()`. tablet_feed check reflects it.
+
+**Next action:** User: pick the laptop monitor once in OBS "HP Laptop" Properties
+(only remaining manual step, ever). Tablet is fully hands-off now.
+`test_obs_switcher.py` 114 checks.
 
 **Hints:** —
