@@ -219,5 +219,80 @@ check("prune keeps MAX_BACKUPS", len(ob.list_backups()) == ob.MAX_BACKUPS,
       str(len(ob.list_backups())))
 
 
+print("\n=== OBS Switcher — build ===\n")
+
+home = new_home()
+p = ob._paths()
+
+# stub the slow/privileged bits (stateful venv: not-ok until built)
+_venv_calls = []
+_venv_state = {"ok": False}
+
+
+def _fake_venv_build():
+    _venv_calls.append(1)
+    _venv_state["ok"] = True
+
+
+ob._venv_build = _fake_venv_build
+ob._venv_ok = lambda: _venv_state["ok"]
+ob._write_shortcuts = lambda: None            # gsettings not under test here
+ob.obs_running = lambda: False
+
+# OBS websocket config with a password present
+p.obs_ws_config.parent.mkdir(parents=True)
+p.obs_ws_config.write_text(json.dumps({
+    "server_enabled": False, "server_port": 4455,
+    "auth_required": False, "server_password": "from-obs",
+}))
+
+r1 = ob.build()
+check("build ok", r1.ok, f"steps={[(s.label, s.ok, s.detail) for s in r1.steps]}")
+check("venv built once", _venv_calls == [1])
+check("password copied from OBS", p.pw_file.read_text() == "from-obs")
+check("password mode 600", stat.S_IMODE(p.pw_file.stat().st_mode) == 0o600)
+check("script written & executable",
+      p.script.is_file() and os.access(p.script, os.X_OK))
+ws = json.loads(p.obs_ws_config.read_text())
+check("websocket enabled in OBS config", ws["server_enabled"] is True)
+check("websocket auth_required set", ws["auth_required"] is True)
+check("build took a backup", len(ob.list_backups()) >= 1)
+
+# idempotent: second run, venv not rebuilt
+r2 = ob.build()
+check("second build ok", r2.ok)
+check("venv not rebuilt (still one call)", _venv_calls == [1])
+
+print("\n=== OBS Switcher — build needs password ===\n")
+home = new_home()
+p = ob._paths()
+ob._venv_build = lambda: None
+ob._venv_ok = lambda: True
+ob._write_shortcuts = lambda: None
+ob.obs_running = lambda: False
+# no OBS config at all
+r3 = ob.build()
+check("needs_password flagged", r3.needs_password is True)
+check("build not ok when password missing", r3.ok is False)
+ob.set_password("typed-by-user")
+r4 = ob.build()
+check("build ok after set_password", r4.ok,
+      f"{[(s.label, s.ok, s.detail) for s in r4.steps]}")
+
+print("\n=== OBS Switcher — _write_shortcuts arg building ===\n")
+import importlib
+ob = importlib.reload(ob)
+home = new_home()
+
+calls = []
+ob._run = lambda cmd, timeout=15, **kw: (calls.append(cmd), _fake_cp("[]"))[1]
+ob._dconf_shortcuts = lambda: {}
+ob._write_shortcuts()
+sets = [c for c in calls if c[:2] == ["gsettings", "set"]]
+check("_write_shortcuts issued gsettings set calls", len(sets) >= 6)
+check("_write_shortcuts wrote the custom-keybindings array",
+      any(c[3] == "custom-keybindings" for c in sets))
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)

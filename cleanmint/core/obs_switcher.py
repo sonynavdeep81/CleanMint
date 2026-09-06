@@ -676,3 +676,139 @@ def restore(labels: list[str], against: Path | None = None) -> list[StepResult]:
         except Exception as e:  # noqa: BLE001
             results.append(StepResult(label, False, str(e)))
     return results
+
+
+# ── GNOME shortcut writer ──────────────────────────────────────────────────
+
+def _write_shortcuts() -> None:
+    """Create/repair the two OBS shortcuts without touching other bindings."""
+    p = _paths()
+    current = _dconf_shortcuts()
+    existing_paths = list(current.keys())
+    existing_cmds = {path: current[path].get("command", "")
+                     for path in existing_paths}
+
+    plan, final_list = plan_shortcut_slots(
+        existing_paths, existing_cmds, str(p.script))
+
+    _run(["gsettings", "set", MEDIA_KEYS_SCHEMA, "custom-keybindings",
+          str(final_list)], timeout=10)
+
+    for path, accel, name, cmd in plan:
+        base = f"{CUSTOM_KEYBINDING_SCHEMA}:{path}"
+        _run(["gsettings", "set", base, "name", f"'{name}'"], timeout=10)
+        _run(["gsettings", "set", base, "command", f"'{cmd}'"], timeout=10)
+        _run(["gsettings", "set", base, "binding", f"'{accel}'"], timeout=10)
+
+
+# ── venv builder (separate so tests can stub it) ───────────────────────────
+
+def _venv_build() -> None:
+    p = _paths()
+    _run(["python3", "-m", "venv", str(p.venv_dir)], timeout=120)
+    _run([str(p.venv_dir / "bin" / "pip"), "install", "--quiet",
+          "--upgrade", "obsws-python"], timeout=300)
+
+
+# ── build ─────────────────────────────────────────────────────────────────
+
+def build(progress_cb=None) -> BuildResult:
+    """Run every auto-fixable setup step, idempotently."""
+    p = _paths()
+    result = BuildResult()
+
+    def step(label, pct, fn):
+        if progress_cb:
+            progress_cb(label, pct)
+        try:
+            detail = fn() or "done"
+            result.steps.append(StepResult(label, True, detail))
+        except NeedsPasswordError:
+            result.needs_password = True
+            result.steps.append(
+                StepResult(label, False, "no password available"))
+        except Exception as e:  # noqa: BLE001
+            result.steps.append(StepResult(label, False, str(e)))
+
+    def _do_venv():
+        if _venv_ok():
+            return "already present"
+        _venv_build()
+        if not _venv_ok():
+            raise RuntimeError("venv created but obsws-python import failed")
+        return "created + obsws-python installed"
+
+    def _do_pwdir():
+        p.pw_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(p.pw_dir, 0o700)
+        return str(p.pw_dir)
+
+    def _do_password():
+        pw = read_obs_password()
+        if pw:
+            set_password(pw)
+            return "copied from OBS config"
+        ok, _ = _password_ok()
+        if ok:
+            return "kept existing password file"
+        raise NeedsPasswordError()
+
+    def _do_script():
+        _write_script()
+        return str(p.script)
+
+    def _do_websocket():
+        if obs_running():
+            result.warnings.append(
+                "OBS is open — enable WebSocket in Tools → WebSocket Server "
+                "Settings (port 4455, authentication on), then run Build again.")
+            return "skipped (OBS running)"
+        if not p.obs_ws_config.is_file():
+            result.warnings.append(
+                "OBS WebSocket config not found — open OBS once, then run "
+                "Build again to enable the WebSocket server.")
+            return "skipped (OBS not set up yet)"
+        backup()  # pre-flight
+        data = json.loads(p.obs_ws_config.read_text())
+        data["server_enabled"] = True
+        data["server_port"] = WS_PORT
+        data["auth_required"] = True
+        p.obs_ws_config.write_text(json.dumps(data, indent=2))
+        return "enabled on port 4455"
+
+    def _do_shortcuts():
+        _write_shortcuts()
+        return "Ctrl+Alt+1 → Laptop, Ctrl+Alt+2 → Tablet"
+
+    step("Python environment", 10, _do_venv)
+    step("Password folder", 25, _do_pwdir)
+    step("WebSocket password", 40, _do_password)
+    step("Switch script", 55, _do_script)
+    step("OBS WebSocket", 70, _do_websocket)
+    step("GNOME shortcuts", 85, _do_shortcuts)
+    step("Backup", 100, lambda: str(backup()))
+    return result
+
+
+# ── Lock / unlock ─────────────────────────────────────────────────────────
+
+def _pkexec_helper(op: str) -> tuple[bool, str]:
+    if not HELPER.exists():
+        return False, ("CleanMint helper not installed — relaunch CleanMint "
+                       "and accept the helper install prompt.")
+    try:
+        r = _run(["pkexec", str(HELPER), op], timeout=60)
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
+    if r.returncode == 0:
+        return True, ""
+    return False, (r.stderr.strip() or r.stdout.strip()
+                   or f"pkexec exited {r.returncode}")
+
+
+def lock() -> tuple[bool, str]:
+    return _pkexec_helper("obs-lock")
+
+
+def unlock() -> tuple[bool, str]:
+    return _pkexec_helper("obs-unlock")
