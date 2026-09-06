@@ -399,12 +399,18 @@ Cleanmint/
   Only delete a copy when at least one copy exists OUTSIDE the safe zone (so data is always preserved).
   All deletions still go through `validate_delete()`.
 
-### 21. Snap revision cleaner must never remove GPU/platform content snaps
+### 21. Snap revision cleaner must never remove the LAST copy of a snap
 - WRONG: cleaning all "disabled" snap revisions can remove `mesa-2404` (GPU driver) or GNOME platform
   snaps — this silently breaks apps like the Ubuntu App Center (snap-store) without any obvious error.
-- CORRECT: `_PROTECTED_SNAPS` in `cleaner.py` lists snaps that are NEVER removed even if disabled:
-  `mesa-2404`, `mesa-2204`, `core`/`core18`/`core20`/`core22`/`core24`, all `gnome-*` platform snaps,
-  `gtk-common-themes`, `snapd`. Protected snaps log as `[SNAP PROTECTED]` and are skipped silently.
+- WRONG (v2): a blanket `_PROTECTED_SNAPS` name list — it also hid ~2 GB of genuinely-superseded
+  revisions (old `core20`/`mesa-2404`/`gnome-*` revisions that DO have a newer active revision),
+  so "Free Space" kept showing them and freeing nothing.
+- CORRECT: `list_removable_snap_revisions()` in `cleaner.py` — a disabled revision is removable
+  ONLY if `snap list --all` shows the same snap still has an active (non-disabled) revision.
+  A fully-disabled snap keeps every revision. `_clean_snap_revisions` and the scanner's
+  `_scan_snap_revisions` both use it, so the count and the clean always agree.
+- Journal: scanner reports `max(0, size - 50 MB)` (the vacuum floor), so a 32 MB journal shows
+  0 recoverable instead of a phantom 32 MB.
 
 ### 22. Polkit setup prompt must not nag on every launch
 - WRONG: the "policy update available" branch ignored the declined flag, so a failing or

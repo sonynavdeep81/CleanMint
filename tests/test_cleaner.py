@@ -181,6 +181,46 @@ check("Real trash folder still intact (if exists)",
 
 
 # ---------------------------------------------------------------
+# list_removable_snap_revisions — bug #21 guard
+# ---------------------------------------------------------------
+import core.cleaner as _cl
+import subprocess as _sp
+
+_FAKE_SNAP = """Name          Version  Rev   Tracking       Publisher   Notes
+core20        20260410 2866  latest/stable  canonical**  base
+core20        20260211 2769  latest/stable  canonical**  base,disabled
+mesa-2404     25.2.8   1839  latest/stable  canonical**  -
+mesa-2404     25.0.7   1165  latest/stable  canonical**  disabled
+deadsnap      1.0      10    latest/stable  someone      disabled
+firefox       120      500   latest/stable  mozilla      -
+"""
+
+_orig_run = _sp.run
+
+
+def _fake_run(cmd, *a, **k):
+    if cmd[:3] == ["snap", "list", "--all"]:
+        return _sp.CompletedProcess(cmd, 0, _FAKE_SNAP, "")
+    return _orig_run(cmd, *a, **k)
+
+
+_cl.subprocess.run = _fake_run
+try:
+    rem = _cl.list_removable_snap_revisions()
+finally:
+    _cl.subprocess.run = _orig_run
+
+names = {n for n, _r, _s in rem}
+check("removable: supersededcore20 revision included", ("core20", "2769") in
+      {(n, r) for n, r, _s in rem})
+check("removable: superseded mesa-2404 revision included",
+      ("mesa-2404", "1165") in {(n, r) for n, r, _s in rem})
+check("removable: fully-disabled 'deadsnap' NOT included (last copy)",
+      "deadsnap" not in names)
+check("removable: active-only firefox not included", "firefox" not in names)
+
+
+# ---------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------
 total = len(results)
