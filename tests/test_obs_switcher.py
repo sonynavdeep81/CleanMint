@@ -112,9 +112,11 @@ check("read_obs_password reads server_password", ob.read_obs_password() == "s3cr
 p.obs_ws_config.write_text("{ not json")
 check("read_obs_password None on bad json", ob.read_obs_password() is None)
 
-# websocket_reachable: nothing listening on 4455 in CI
-check("websocket_reachable False when nothing listens",
-      ob.websocket_reachable(timeout=0.2) is False)
+# websocket_reachable: closed port -> False (use a port nothing binds)
+check("websocket_reachable False on a closed port",
+      ob.websocket_reachable(timeout=0.2, port=59999) is False)
+check("websocket_reachable returns a bool for the real port",
+      isinstance(ob.websocket_reachable(timeout=0.2), bool))
 
 # obs_running returns a bool and does not raise
 check("obs_running returns bool", isinstance(ob.obs_running(), bool))
@@ -292,6 +294,20 @@ sets = [c for c in calls if c[:2] == ["gsettings", "set"]]
 check("_write_shortcuts issued gsettings set calls", len(sets) >= 6)
 check("_write_shortcuts wrote the custom-keybindings array",
       any(c[3] == "custom-keybindings" for c in sets))
+
+
+print("\n=== OBS Switcher — build refuses when files are locked ===\n")
+
+ob = importlib.reload(ob)
+home = new_home()
+p = ob._paths()
+ob.is_locked = lambda: True
+r_locked = ob.build()
+check("build flags needs_unlock when locked", r_locked.needs_unlock is True)
+check("build not ok when locked", r_locked.ok is False)
+check("build wrote nothing while locked", not p.script.exists())
+check("locked build explains itself",
+      any("protect" in s.detail.lower() for s in r_locked.steps))
 
 
 print("\n=== OBS Switcher — self_test ===\n")

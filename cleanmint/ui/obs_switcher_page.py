@@ -311,8 +311,39 @@ class ObsSwitcherPage(QWidget):
         self._run_worker(ob.build, wants_progress=True,
                          on_done=self._after_build)
 
+    def _unlock_build_relock(self, progress_cb=None):
+        """Temporarily lift protection, run build, then restore protection."""
+        if progress_cb:
+            progress_cb("Unprotecting files…", 5)
+        ok, err = ob.unlock()
+        if not ok:
+            res = ob.BuildResult()
+            res.steps.append(ob.StepResult(
+                "Unprotect files", False, err or "could not unprotect"))
+            return res
+        result = ob.build(progress_cb=progress_cb)
+        if progress_cb:
+            progress_cb("Re-protecting files…", 98)
+        ob.lock()
+        return result
+
     def _after_build(self, result):
         if result is None:
+            return
+        if getattr(result, "needs_unlock", False):
+            if QMessageBox.question(
+                self, "Files are protected",
+                "The switch script and password are protected against "
+                "changes.\n\nTemporarily unprotect them, run the repair, "
+                "then protect them again?",
+            ) == QMessageBox.StandardButton.Yes:
+                self._run_worker(self._unlock_build_relock, wants_progress=True,
+                                 on_done=self._after_build)
+            else:
+                QMessageBox.information(
+                    self, "Build / Repair",
+                    "Nothing changed. Click “Unprotect Files”, then "
+                    "“Build / Repair Setup”.")
             return
         if result.needs_password:
             pw, ok = QInputDialog.getText(
