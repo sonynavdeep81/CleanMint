@@ -778,11 +778,20 @@ def build(progress_cb=None) -> BuildResult:
         return str(p.script)
 
     def _do_websocket():
-        if obs_running() or websocket_reachable():
+        # Already on? Nothing to do — this is the normal case once set up.
+        enabled, _ = _websocket_enabled()
+        if enabled or websocket_reachable():
+            return "already enabled on port 4455"
+        # Disabled. We can only safely patch the config file while OBS is
+        # closed — OBS rewrites config.json from memory on exit, so a change
+        # made while it runs would be lost.
+        if obs_running():
             result.warnings.append(
-                "OBS is open — enable WebSocket in Tools → WebSocket Server "
-                "Settings (port 4455, authentication on), then run Build again.")
-            return "skipped (OBS running)"
+                "OBS's WebSocket server is off. Turn it on in OBS: "
+                "Tools → WebSocket Server Settings → tick “Enable WebSocket "
+                "server” (port 4455, Enable Authentication). CleanMint can't "
+                "change this while OBS is running.")
+            return "needs OBS (turn it on in OBS's Tools menu)"
         if not p.obs_ws_config.is_file():
             result.warnings.append(
                 "OBS WebSocket config not found — open OBS once, then run "

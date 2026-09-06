@@ -276,6 +276,25 @@ r2 = ob.build()
 check("second build ok", r2.ok)
 check("venv not rebuilt (still one call)", _venv_calls == [1])
 
+# websocket already enabled -> no patch, no warning, even with OBS "running"
+home = new_home()
+p = ob._paths()
+ob._venv_ok = lambda: True
+ob.obs_running = lambda: True
+ob.websocket_reachable = lambda *a, **k: True
+p.obs_ws_config.parent.mkdir(parents=True)
+p.obs_ws_config.write_text(json.dumps({
+    "server_enabled": True, "server_port": 4455,
+    "auth_required": True, "server_password": "already",
+}))
+r_ws = ob.build()
+ws_step = next(s for s in r_ws.steps if s.label == "OBS WebSocket")
+check("websocket step ok when already enabled", ws_step.ok)
+check("websocket step says 'already'", "already" in ws_step.detail.lower())
+check("no websocket warning when already enabled", not r_ws.warnings)
+ob.obs_running = lambda: False
+ob.websocket_reachable = lambda *a, **k: False
+
 print("\n=== OBS Switcher — build needs password ===\n")
 home = new_home()
 p = ob._paths()
