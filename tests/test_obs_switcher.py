@@ -171,5 +171,53 @@ byk2 = {c.key: c for c in ob.check_status()}
 check("password_file ok once written & matching", byk2["password_file"].ok is True)
 
 
+print("\n=== OBS Switcher — backup / verify / restore ===\n")
+
+home = new_home()
+p = ob._paths()
+# minimal setup: obs config dir + script + password
+p.obs_cfg_dir.mkdir(parents=True)
+(p.obs_cfg_dir / "global.ini").write_text("[General]\n")
+ob.set_password("pw-A")
+ob._write_script()
+
+b1 = ob.backup()
+check("backup dir created", b1.is_dir())
+check("manifest written", (b1 / "manifest.json").is_file())
+man = json.loads((b1 / "manifest.json").read_text())
+check("manifest has sha256 for obs-scene", "obs-scene" in man["sha256"])
+check("manifest has sha256 for password", "password" in man["sha256"])
+check("obs-studio copied into backup",
+      (b1 / "obs-studio" / "global.ini").is_file())
+check("backup dir mode 700", stat.S_IMODE(b1.stat().st_mode) == 0o700)
+
+# nothing changed -> all ok
+items = {i.label: i for i in ob.verify()}
+check("verify: script ok", items["obs-scene script"].status == "ok")
+check("verify: password ok", items["WebSocket password"].status == "ok")
+
+# mutate script, delete password
+p.script.write_text("#!/bin/sh\necho tampered\n")
+p.pw_file.unlink()
+items2 = {i.label: i for i in ob.verify()}
+check("verify: script changed", items2["obs-scene script"].status == "changed")
+check("verify: password missing", items2["WebSocket password"].status == "missing")
+
+# restore both
+res = {r.label: r for r in ob.restore(["obs-scene script", "WebSocket password"])}
+check("restore script ok", res["obs-scene script"].ok)
+check("restore password ok", res["WebSocket password"].ok)
+sha = hashlib.sha256(p.script.read_bytes()).hexdigest()
+check("restored script matches manifest hash", sha == man["sha256"]["obs-scene"])
+check("restored password mode 600",
+      stat.S_IMODE(p.pw_file.stat().st_mode) == 0o600)
+
+# pruning
+for _ in range(12):
+    ob.backup()
+check("prune keeps MAX_BACKUPS", len(ob.list_backups()) == ob.MAX_BACKUPS,
+      str(len(ob.list_backups())))
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)

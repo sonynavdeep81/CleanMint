@@ -448,9 +448,12 @@ def _newest_backup() -> Path | None:
     return backups[0] if backups else None
 
 
+_BACKUP_TS_FMT = "%Y%m%d_%H%M%S_%f"
+
+
 def _backup_age_text(path: Path) -> str:
     try:
-        ts = datetime.strptime(path.name, "%Y%m%d_%H%M%S")
+        ts = datetime.strptime(path.name, _BACKUP_TS_FMT)
         delta = datetime.now() - ts
         if delta.days:
             return f"{delta.days} day(s) ago"
@@ -528,3 +531,148 @@ def check_status() -> list[Check]:
         _backup_age_text(nb) if nb else "none yet", fixable=False,
     ))
     return checks
+
+
+# ── Backup / verify / restore ──────────────────────────────────────────────
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def _dconf_dump() -> str:
+    try:
+        return _run(["dconf", "dump", DCONF_MEDIA_KEYS], timeout=10).stdout
+    except Exception:
+        return ""
+
+
+def backup(progress_cb=None) -> Path:
+    """Snapshot the automation layer + OBS config into a timestamped folder."""
+    def _prog(msg):
+        if progress_cb:
+            progress_cb(msg, 0)
+
+    p = _paths()
+    ts = datetime.now().strftime(_BACKUP_TS_FMT)
+    dest = p.backup_root / ts
+    dest.mkdir(parents=True, exist_ok=True)
+    os.chmod(dest, 0o700)
+
+    sha: dict[str, str] = {}
+
+    _prog("Copying OBS configuration…")
+    if p.obs_cfg_dir.is_dir():
+        shutil.copytree(p.obs_cfg_dir, dest / "obs-studio", dirs_exist_ok=True)
+
+    _prog("Saving GNOME shortcuts…")
+    (dest / "obs-gnome-shortcuts.dconf").write_text(_dconf_dump())
+
+    _prog("Copying script and password…")
+    if p.script.is_file():
+        shutil.copy2(p.script, dest / "obs-scene")
+        sha["obs-scene"] = _sha256(p.script)
+    if p.pw_file.is_file():
+        shutil.copy2(p.pw_file, dest / "password")
+        os.chmod(dest / "password", 0o600)
+        sha["password"] = _sha256(p.pw_file)
+
+    manifest = {
+        "created_at": datetime.now().isoformat(),
+        "obs_running": obs_running(),
+        "scene_names": sorted(_scene_names_on_disk()),
+        "sha256": sha,
+    }
+    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    _prog("Pruning old backups…")
+    for old in list_backups()[MAX_BACKUPS:]:
+        shutil.rmtree(old, ignore_errors=True)
+
+    return dest
+
+
+def verify(against: Path | None = None) -> list[VerifyItem]:
+    p = _paths()
+    backup_dir = against or _newest_backup()
+    if backup_dir is None:
+        return []
+    manifest = json.loads((backup_dir / "manifest.json").read_text())
+    sha = manifest.get("sha256", {})
+    items: list[VerifyItem] = []
+
+    def _verify_file(label, live: Path, key: str):
+        has_src = (backup_dir / key).is_file()
+        if not live.is_file():
+            return VerifyItem(label, "missing", has_src)
+        if key in sha and _sha256(live) == sha[key]:
+            return VerifyItem(label, "ok", has_src)
+        return VerifyItem(label, "changed", has_src)
+
+    items.append(_verify_file("obs-scene script", p.script, "obs-scene"))
+    items.append(_verify_file("WebSocket password", p.pw_file, "password"))
+
+    cur = _dconf_dump().strip()
+    bak = (backup_dir / "obs-gnome-shortcuts.dconf").read_text().strip()
+    if not cur:
+        status = "missing"
+    elif cur == bak:
+        status = "ok"
+    else:
+        status = "changed"
+    items.append(VerifyItem("GNOME shortcuts", status, bool(bak)))
+
+    on_disk = _scene_names_on_disk()
+    for scene in SCENES:
+        items.append(VerifyItem(
+            f'OBS scene "{scene}"',
+            "ok" if scene in on_disk else "missing",
+            (backup_dir / "obs-studio").is_dir(),
+        ))
+
+    items.append(VerifyItem(
+        "OBS config folder",
+        "ok" if p.obs_cfg_dir.is_dir() else "missing",
+        (backup_dir / "obs-studio").is_dir(),
+    ))
+    return items
+
+
+def restore(labels: list[str], against: Path | None = None) -> list[StepResult]:
+    p = _paths()
+    backup_dir = against or _newest_backup()
+    results: list[StepResult] = []
+    if backup_dir is None:
+        return [StepResult("restore", False, "no backup available")]
+
+    for label in labels:
+        try:
+            if label == "obs-scene script":
+                shutil.copy2(backup_dir / "obs-scene", p.script)
+                os.chmod(p.script, 0o755)
+                results.append(StepResult(label, True, "restored"))
+            elif label == "WebSocket password":
+                p.pw_dir.mkdir(parents=True, exist_ok=True)
+                os.chmod(p.pw_dir, 0o700)
+                shutil.copy2(backup_dir / "password", p.pw_file)
+                os.chmod(p.pw_file, 0o600)
+                results.append(StepResult(label, True, "restored"))
+            elif label == "GNOME shortcuts":
+                _write_shortcuts()
+                results.append(StepResult(label, True, "shortcuts re-applied"))
+            elif label in ('OBS scene "Laptop"', 'OBS scene "Tablet"',
+                           "OBS config folder"):
+                if obs_running():
+                    results.append(StepResult(
+                        label, False, "close OBS first, then restore"))
+                else:
+                    shutil.copytree(backup_dir / "obs-studio", p.obs_cfg_dir,
+                                    dirs_exist_ok=True)
+                    results.append(StepResult(
+                        label, True, "OBS config restored"))
+            else:
+                results.append(StepResult(label, False, "unknown item"))
+        except Exception as e:  # noqa: BLE001
+            results.append(StepResult(label, False, str(e)))
+    return results
