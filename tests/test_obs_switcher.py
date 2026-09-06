@@ -332,5 +332,18 @@ check("self_test one precondition failure when ws down",
       len(steps2) == 1 and steps2[0].ok is False)
 
 
+print("\n=== OBS Switcher — helper asset ===\n")
+
+helper = (Path(__file__).parent.parent / "cleanmint" / "assets"
+          / "cleanmint-helper")
+htext = helper.read_text()
+check("helper has obs-lock case", "obs-lock" in htext)
+check("helper has obs-unlock case", "obs-unlock" in htext)
+check("helper derives home from PKEXEC_UID", "PKEXEC_UID" in htext)
+check("helper uses chattr", "chattr" in htext)
+lint = subprocess.run(["bash", "-n", str(helper)], capture_output=True, text=True)
+check("helper passes bash -n", lint.returncode == 0, lint.stderr.strip())
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)
