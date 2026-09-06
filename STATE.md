@@ -42,7 +42,11 @@ Despite the bad UX, the user's partial install DID land the obs-v4l2 helper;
 scrcpy feed NOT running (user clicks "Set Up Scenes" to start it — no password
 prompt now since v4l2 already prepared).
 
-**Next action:** User clicks "Set Up Scenes" → tablet feed starts, appears in OBS.
-`git push` when ready (~21 commits ahead of origin/main).
+**Fixed (merged 734148d):** tablet showed at native 2560x1600 with striped
+(empty-canvas) borders → Set Up Scenes now applies OBS_BOUNDS_SCALE_INNER
+sized to the canvas to every source in both scenes ("Fit to screen" step).
+
+**Next action:** feature complete + pushed. User clicks "Set Up Scenes" to
+(re)start the feed after reboots. `test_obs_switcher.py` 112 checks.
 
 **Hints:** —
