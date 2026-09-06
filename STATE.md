@@ -24,14 +24,16 @@ Protect/Unprotect work (rm refused while locked). check_status all green.
 `test_backend_phase5.py` "Source field valid"; `test_integration.py`
 "Would delete" wording (+ a /tmp race from a concurrent process).
 
-**Added (merged):** "Set Up Scenes" button — creates Laptop/Tablet scenes +
-`pipewire-screen-capture-source` sources via WebSocket API, launches scrcpy
-first, backs up config, leaves existing scenes untouched. Opt-in + confirm.
-Scope chosen by user: scenes + sources + auto-launch scrcpy. Verified
-idempotent against live OBS (everything present → "left as-is").
-`test_obs_switcher.py` now 104 checks.
+**"Set Up Scenes" (merged, then reworked for the tablet):**
+- Laptop scene: `pipewire-screen-capture-source` (one portal pick, token persists)
+- Tablet scene: `scrcpy --v4l2-sink=/dev/video42` → `v4l2_input` source. NO Wayland
+  portal, survives restarts. Helper op `obs-v4l2` loads v4l2loopback +
+  boot-persistence. New `tablet_feed` status check.
+- VERIFIED on real hardware: live tablet screen captured in OBS (screenshot).
+- `test_obs_switcher.py` now 111 checks.
+- NOTE: helper changed again → app re-prompts to update polkit helper on launch.
 
-**Next action:** Nothing required. `git push` when ready
-(main ~16 commits ahead of origin/main).
+**Next action:** User relaunches, accepts helper update, clicks "Set Up Scenes"
+→ tablet appears automatically. `git push` when ready (~19 commits ahead).
 
 **Hints:** —
