@@ -1,22 +1,19 @@
 # STATE — resume pointer
 
-**Focus:** OBS Switcher feature — code complete on branch `feat/obs-switcher`.
+**Focus:** OBS Switcher feature — DONE, merged to `main` (merge commit a7c166b).
+`main` is 2 commits ahead of `origin/main` (not pushed — push when ready).
 
-**Last decision:** Implemented per plan
-`docs/superpowers/plans/2026-09-06-obs-switcher.md` (Tasks 1–12).
-Engine `core/obs_switcher.py`, page `ui/obs_switcher_page.py`, helper
-`obs-lock`/`obs-unlock`, sidebar entry. `tests/test_obs_switcher.py` 85/85,
-`test_ui_imports.py` 15/15. Real-machine check_status all green (tablet=info,
-backup created). Offscreen page smoke passed.
+**What shipped:** `core/obs_switcher.py` + `ui/obs_switcher_page.py` +
+`cleanmint-helper` obs-lock/obs-unlock + sidebar entry. Spec/plan in
+`docs/superpowers/`. Tests: `test_obs_switcher.py` 85/85, `test_ui_imports.py` 15/15.
 
-**Pre-existing failures (NOT from this work, present on main):**
+**Pre-existing failures (NOT this work, also on old main):**
 `test_backend_phase5.py` "Source field valid"; `test_integration.py`
-"Would delete" wording + a /tmp race from a concurrent process.
+"Would delete" wording (+ a /tmp race from a concurrent process).
 
-**Next action:** User to run the interactive smoke test (Task 12 step 4):
-launch app → OBS Switcher page; with OBS open click "Test Switching";
-click "Protect Files" (pkexec) then confirm `rm ~/.local/bin/obs-scene` is
-refused; "Unprotect Files"; "Check & Restore". Then merge (finishing-a-branch).
-NOTE: helper changed → app will prompt to update the polkit helper on launch.
+**Next action:** User runs the interactive smoke test — launch app (accept the
+polkit helper update prompt), OBS Switcher page: with OBS open click
+"Test Switching"; "Protect Files" then confirm `rm ~/.local/bin/obs-scene` is
+refused; "Unprotect Files"; "Check & Restore". Then `git push` if all good.
 
 **Hints:** —
