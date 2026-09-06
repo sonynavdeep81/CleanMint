@@ -56,10 +56,16 @@ GitHub: https://github.com/sonynavdeep81/CleanMint
     changed/missing/scene-name-gone; restore is per-item (OBS-config restore
     needs OBS closed; shortcut restore re-applies the two keys, never a blind
     `dconf load`)
+  - "Set Up Scenes": creates the "Laptop"/"Tablet" scenes + their
+    `pipewire-screen-capture-source` sources via the WebSocket API, and launches
+    `scrcpy --window-title="Samsung Tablet"` first. Backs up the OBS config,
+    leaves existing scenes untouched, and needs OBS running. The PipeWire
+    sources still need one portal pick each (OBS shows the dialog). This is the
+    only action that writes to the scene collection — opt-in, behind a confirm.
   - "Test Switching": runs the real `obs-scene Laptop`/`Tablet` against a live
     OBS via WebSocket, confirms the program scene changed, restores the original
   - Engine `core/obs_switcher.py` (UI-free), page `ui/obs_switcher_page.py`
-  - NEVER edits OBS scene contents
+  - Never edits EXISTING scenes; only "Set Up Scenes" adds missing ones
 - **Settings page**: Dark/light mode, persistent JSON settings
 - **Logs page**: Shows CleanMint session logs with color-coded highlighting
   - `[DELETED]` / `[SNAP REMOVED]` lines highlighted red — shows exactly what was removed

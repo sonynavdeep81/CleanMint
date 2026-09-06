@@ -341,6 +341,70 @@ check("locked build explains itself",
       any("protect" in s.detail.lower() for s in r_locked.steps))
 
 
+print("\n=== OBS Switcher — setup_scenes ===\n")
+
+ob = importlib.reload(ob)
+home = new_home()
+
+# precondition: no websocket
+ob.websocket_reachable = lambda *a, **k: False
+s0 = ob.setup_scenes()
+check("setup_scenes precondition fails without websocket",
+      len(s0) == 1 and s0[0].ok is False)
+
+# everything already present -> no scrcpy, all "already set up"
+ob.websocket_reachable = lambda *a, **k: True
+ob.backup = lambda *a, **k: None
+_scrcpy_launched = []
+ob._launch_scrcpy = lambda: (_scrcpy_launched.append(1), (True, "x"))[1]
+ob.scrcpy_running = lambda: True
+ob._obs_py = lambda body, timeout=60: (
+    ({"scenes": ["Laptop", "Tablet"],
+      "src": {"Laptop": ["HP Laptop"], "Tablet": ["Samsung Tablet"]}}, "")
+    if "get_scene_item_list(sc).scene_items]" in body else
+    ({"created_scenes": [], "created_sources": [],
+      "existing": ["Laptop: HP Laptop", "Tablet: Samsung Tablet"],
+      "errors": []}, ""))
+s1 = ob.setup_scenes()
+check("all present: no scrcpy launched", _scrcpy_launched == [])
+check("all present: reports 'already set up'",
+      any("already set up" in s.label.lower() for s in s1))
+check("all present: no failures", all(s.ok for s in s1))
+
+# nothing present -> scrcpy launched, scenes + sources created
+home = new_home()
+_scrcpy_launched.clear()
+ob.scrcpy_running = lambda: False
+ob._launch_scrcpy = lambda: (_scrcpy_launched.append(1), (True, "launched"))[1]
+ob._obs_py = lambda body, timeout=60: (
+    ({"scenes": [], "src": {"Laptop": None, "Tablet": None}}, "")
+    if "out = {'scenes': scenes" in body else
+    ({"created_scenes": ["Laptop", "Tablet"],
+      "created_sources": ["Laptop / HP Laptop", "Tablet / Samsung Tablet"],
+      "existing": [], "errors": []}, ""))
+s2 = ob.setup_scenes()
+check("nothing present: scrcpy launched once", _scrcpy_launched == [1])
+check("nothing present: scenes created",
+      sum("Scene" in s.label for s in s2) == 2)
+check("nothing present: sources created",
+      sum("Source" in s.label for s in s2) == 2)
+check("nothing present: portal guidance shown",
+      any("Finish in OBS" in s.label for s in s2))
+
+# tablet source already there, laptop scene missing -> no scrcpy launch
+home = new_home()
+_scrcpy_launched.clear()
+ob.scrcpy_running = lambda: False
+ob._obs_py = lambda body, timeout=60: (
+    ({"scenes": ["Tablet"], "src": {"Laptop": None,
+                                    "Tablet": ["Samsung Tablet"]}}, "")
+    if "out = {'scenes': scenes" in body else
+    ({"created_scenes": ["Laptop"], "created_sources": ["Laptop / HP Laptop"],
+      "existing": ["Tablet: Samsung Tablet"], "errors": []}, ""))
+s3 = ob.setup_scenes()
+check("tablet already captured: scrcpy NOT launched", _scrcpy_launched == [])
+
+
 print("\n=== OBS Switcher — self_test ===\n")
 
 ob = importlib.reload(ob)

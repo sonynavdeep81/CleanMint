@@ -114,9 +114,10 @@ class RestoreDialog(QDialog):
 
 
 class TestReportDialog(QDialog):
-    def __init__(self, steps: list[ob.StepResult], parent=None):
+    def __init__(self, steps: list[ob.StepResult], parent=None,
+                 title: str = "Test Switching"):
         super().__init__(parent)
-        self.setWindowTitle("Test Switching")
+        self.setWindowTitle(title)
         self.setMinimumWidth(460)
         self.setStyleSheet(Theme.stylesheet())
         lay = QVBoxLayout(self)
@@ -231,6 +232,13 @@ class ObsSwitcherPage(QWidget):
         self._restore_btn.clicked.connect(self._check_restore)
         bar.addWidget(self._restore_btn)
 
+        self._scenes_btn = QPushButton("🎬  Set Up Scenes")
+        self._scenes_btn.setObjectName("SecondaryBtn")
+        self._scenes_btn.setFixedHeight(34)
+        self._scenes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._scenes_btn.clicked.connect(self._setup_scenes)
+        bar.addWidget(self._scenes_btn)
+
         self._test_btn = QPushButton("▶  Test Switching")
         self._test_btn.setObjectName("SecondaryBtn")
         self._test_btn.setFixedHeight(34)
@@ -259,7 +267,8 @@ class ObsSwitcherPage(QWidget):
     # ── helpers ──────────────────────────────────────────────────────────
     def _set_busy(self, busy: bool):
         for b in (self._build_btn, self._lock_btn, self._backup_btn,
-                  self._restore_btn, self._test_btn, self._refresh_btn):
+                  self._restore_btn, self._scenes_btn, self._test_btn,
+                  self._refresh_btn):
             b.setEnabled(not busy)
 
     def _set_status(self, msg: str):
@@ -447,3 +456,22 @@ class ObsSwitcherPage(QWidget):
             TestReportDialog(steps, self).exec()
 
         self._run_worker(ob.self_test, wants_progress=True, on_done=_done)
+
+    def _setup_scenes(self):
+        if QMessageBox.question(
+            self, "Set Up Scenes in OBS",
+            "This creates the “Laptop” and “Tablet” scenes and their capture "
+            "sources in OBS, and launches scrcpy for the tablet. Your OBS "
+            "configuration is backed up first, and existing scenes are left "
+            "untouched.\n\nOBS will show a screen-share dialog for each new "
+            "source — you pick the display / window.\n\nContinue?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        def _done(steps):
+            if steps is None:
+                return
+            TestReportDialog(steps, self, title="Set Up Scenes").exec()
+            self._refresh()
+
+        self._run_worker(ob.setup_scenes, wants_progress=True, on_done=_done)
