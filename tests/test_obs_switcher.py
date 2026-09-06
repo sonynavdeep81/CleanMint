@@ -141,5 +141,35 @@ check("script shebang points at venv py",
 check("script embeds pw file path", f'"{p.pw_file}"' in p.script.read_text())
 
 
+print("\n=== OBS Switcher — check_status ===\n")
+
+home = new_home()
+checks = ob.check_status()
+keys = {c.key for c in checks}
+for expected in ("obs_installed", "websocket", "password_file", "venv",
+                 "script", "shortcuts", "scenes", "scrcpy", "adb",
+                 "protection", "backup"):
+    check(f"check present: {expected}", expected in keys)
+
+check("nothing raised; all are Check", all(isinstance(c, ob.Check) for c in checks))
+byk = {c.key: c for c in checks}
+check("empty sandbox: password_file not ok", byk["password_file"].ok is False)
+check("empty sandbox: script not ok", byk["script"].ok is False)
+check("password_file is fixable", byk["password_file"].fixable is True)
+check("scenes check is not fixable", byk["scenes"].fixable is False)
+check("non-fixable scenes has manual_steps text",
+      len(byk["scenes"].manual_steps) > 0)
+
+# after writing a good password + script, those flip to ok
+p = ob._paths()
+p.obs_ws_config.parent.mkdir(parents=True)
+p.obs_ws_config.write_text(json.dumps({"server_password": "x",
+                                       "server_enabled": True,
+                                       "server_port": 4455}))
+ob.set_password("x")
+byk2 = {c.key: c for c in ob.check_status()}
+check("password_file ok once written & matching", byk2["password_file"].ok is True)
+
+
 print(f"\n{sum(results)}/{len(results)} checks passed\n")
 sys.exit(0 if all(results) else 1)
